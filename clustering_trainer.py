@@ -1493,6 +1493,8 @@ class VAEClusteringTrainer:
         try:
             self.pretrain()
             self.train_and_evaluate()
+            topo_dir = str(self.output_dir / "final_cluster_topomaps")
+            self.model.get_cluster_centroids_and_visualize(output_dir=topo_dir)
             self.run_explainability()
             self.run_deep_diagnostics()
             final_metrics = self.run_final_comparison()
