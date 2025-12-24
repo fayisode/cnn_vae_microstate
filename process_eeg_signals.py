@@ -317,14 +317,6 @@ class EEGProcessor:
         )
         self.logger.info("Applied 2-20 Hz bandpass filter")
 
-        # Apply spatial filter to reduce local artifacts
-        if apply_filter:
-            try:
-                apply_spatial_filter(raw, n_jobs=-1)
-                self.logger.info("Applied spatial filter (PyCrostates)")
-            except Exception as e:
-                self.logger.warning(f"Spatial filter failed (optional): {e}")
-
         self.info = raw.info
         return raw
 
