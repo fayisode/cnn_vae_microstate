@@ -1,0 +1,30 @@
+[vae]
+batch_size = 128
+# batch_size = 32
+gamma = 1e-5
+gamma_step = 200
+n_clusters = 3
+type_ = "CNN"
+epochs = 60
+# epochs = 15
+latent_dims = 128
+input_shape = [1, 28, 28]
+channels = [32, 64, 128, 256, 512, 1024]
+kernel_sizes = [4, 3, 3, 3, 3, 3]
+strides = [2, 2, 2, 2, 2, 1]
+activation = "LeakyRELU"
+
+
+[data]
+train_dir = "/train_32*32.mat"
+train_url = "http://ufldl.stanford.edu/housenumbers/train_32x32.mat"
+test_dir = "/test_32x32.mat"
+test_url = "http://ufldl.stanford.edu/housenumbers/test_32x32.mat"
+
+[eeg]
+data_dir = "./data"
+figure_dir = "./data/Figure"
+output_path = "./data/Maps"
+person_id = 2
+process_multiple_files = true
+batch_size = 128
