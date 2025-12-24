@@ -266,52 +266,29 @@ class EEGProcessor:
     # =========================================================================
     # Data Loading
     # =========================================================================
-
     def load_preprocessed_dat(self, dat_file_path):
-        """
-        Load ALREADY-PREPROCESSED .dat file with proper trial handling.
-
-        Note: We maintain the original script's padding logic here to ensure
-        the visualization pipeline (which expects specific structures) works correctly.
-        """
         try:
-            self.logger.info(f"Loading data from: {dat_file_path}")
             with open(dat_file_path, "rb") as f:
                 data_dict = pickle.load(f, encoding="latin1")
 
             data = data_dict["data"]
-            # Extract first 32 channels (EEG), ignore others
             eeg_data = data[:, :32, :]
             n_trials, n_channels, n_timepoints = eeg_data.shape
 
             self.raw_data_structure = eeg_data
 
-            # Add padding between trials to avoid edge artifacts during filtering/plotting
-            padding_samples = int(
-                self.config.get("trial_padding_sec", 0.5) * self.sfreq
-            )
-
-            padded_trials = []
-            for trial_idx in range(n_trials):
-                trial = eeg_data[trial_idx]  # (channels, timepoints)
-                padded_trials.append(trial)
-
-                if trial_idx < n_trials - 1:
-                    padding = np.zeros((n_channels, padding_samples))
-                    padded_trials.append(padding)
-
-            reshaped_data = np.hstack(padded_trials)
+            # Concatenate trials directly (NO PADDING)
+            reshaped_data = eeg_data.reshape(n_channels, -1)
 
             self.logger.info(
-                f"Loaded PREPROCESSED data: {n_trials} trials, {n_channels} channels, "
-                f"{n_timepoints} timepoints/trial"
+                f"Loaded {n_trials} trials, {n_channels} channels, "
+                f"{n_timepoints} timepoints/trial (no padding)"
             )
-            self.logger.info(f"Added {padding_samples} samples padding between trials")
 
             return reshaped_data
 
         except Exception as e:
-            self.logger.error(f"Error loading .dat file: {e}")
+            self.logger.error(f"Error: {e}")
             return None
 
     # =========================================================================
