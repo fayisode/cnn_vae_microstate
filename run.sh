@@ -1,4 +1,10 @@
 #!/bin/bash
+#SBATCH --partition=datamite
+#SBATCH --gres=gpu:2
+#SBATCH --job-name=my_training
+#SBATCH --time=24:00:00
+#SBATCH --mem=32G
+
 # if [ -f "outputs" ]; then
 # 	echo "Removing existing outputs..."
 # 	rm -r outputs
