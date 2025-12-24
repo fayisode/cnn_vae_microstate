@@ -3,7 +3,7 @@
 #SBATCH --gres=gpu:2
 #SBATCH --job-name=my_training
 #SBATCH --time=24:00:00
-#SBATCH --mem=32G
+#SBATCH --mem=100G
 
 # if [ -f "outputs" ]; then
 # 	echo "Removing existing outputs..."
