@@ -27,6 +27,8 @@ from config.config import config as c
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# Add this at the top of main() or before any CUDA operations
+os.environ["CUDA_VISIBLE_DEVICES"] = "1,2"
 
 # Call immediately
 
@@ -753,6 +755,10 @@ class ResultsAnalyzer:
 
 def main():
     """Main execution function"""
+
+    import os
+
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1,2"
     try:
         mp.set_sharing_strategy("file_system")
     except RuntimeError:
