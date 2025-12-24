@@ -382,42 +382,89 @@ class EEGProcessor:
 
         # Extract GFP peaks
         self.logger.info("Extracting GFP peaks...")
-        gfp_peaks_raw = extract_gfp_peaks(raw_mne, min_peak_distance=3)
+        # This returns a ChData object containing the maps at peak times
+        gfp_peaks_structure = extract_gfp_peaks(raw_mne, min_peak_distance=3)
 
-        # Get peak indices
-        peak_samples = gfp_peaks_raw.get_data().flatten().astype(int)
-        self.logger.info(f"Found {len(peak_samples)} GFP peaks")
+        # Get the actual data (Channels x Peaks)
+        peak_maps_data = gfp_peaks_structure.get_data()  # Shape: (32, N_peaks)
+        n_peaks = peak_maps_data.shape[1]
 
-        max_samples = self.config.get("max_topo_samples", 50000)
-        if len(peak_samples) > max_samples:
-            selected = np.random.choice(len(peak_samples), max_samples, replace=False)
-            selected.sort()
-            selected_samples = peak_samples[selected]
+        self.logger.info(f"Found {n_peaks} GFP peaks")
+
+        # Sampling if too many peaks
+        max_samples = self.config.get("max_topo_samples", 500000)
+        if n_peaks > max_samples:
+            # Randomly select column indices
+            selected_indices = np.random.choice(n_peaks, max_samples, replace=False)
+            selected_indices.sort()
+            # Select specific columns (peaks)
+            selected_data = peak_maps_data[:, selected_indices]
         else:
-            selected_samples = peak_samples
+            selected_data = peak_maps_data
 
         self.logger.info(
-            f"Generating {len(selected_samples)} maps from "
-            f"{len(peak_samples)} GFP peaks (standard approach)"
+            f"Generating maps from {selected_data.shape[1]} selected peaks"
         )
 
-        # Get data
-        data = raw_mne.get_data()
-
-        # Generate maps
+        # Generate maps (Interpolation)
         maps = []
-        for sample_idx in selected_samples:
-            vals = data[:, sample_idx]
+        # Iterate over the columns (peaks)
+        for i in range(selected_data.shape[1]):
+            vals = selected_data[:, i]  # Get all channels for this peak
             img = self.create_topographic_map(vals, self.pos_2d)
             maps.append(img)
 
-        # Calculate GFP for visualization
-        gfp = np.std(data, axis=0)
-
-        self.sampling_indices = selected_samples
-        self.gfp_curve = gfp
+        # Calculate GFP for visualization (using original raw data for the curve)
+        full_data = raw_mne.get_data()
+        self.gfp_curve = np.std(full_data, axis=0)
+        self.sampling_indices = []
 
         return np.array(maps)
+
+    # def generate_topographic_maps(self, raw_mne):
+    #     """Generate topographic maps from GFP peaks."""
+    #     # Get electrode positions
+    #     self.pos_3d = self.get_3d_coordinates(raw_mne.info["dig"])
+    #     self.pos_2d = np.array([self.azim_proj(p) for p in self.pos_3d])
+    #
+    #     # Extract GFP peaks
+    #     self.logger.info("Extracting GFP peaks...")
+    #     gfp_peaks_raw = extract_gfp_peaks(raw_mne, min_peak_distance=3)
+    #
+    #     # Get peak indices
+    #     peak_samples = gfp_peaks_raw.get_data().flatten().astype(int)
+    #     self.logger.info(f"Found {len(peak_samples)} GFP peaks")
+    #
+    #     max_samples = self.config.get("max_topo_samples", 50000)
+    #     if len(peak_samples) > max_samples:
+    #         selected = np.random.choice(len(peak_samples), max_samples, replace=False)
+    #         selected.sort()
+    #         selected_samples = peak_samples[selected]
+    #     else:
+    #         selected_samples = peak_samples
+    #
+    #     self.logger.info(
+    #         f"Generating {len(selected_samples)} maps from "
+    #         f"{len(peak_samples)} GFP peaks (standard approach)"
+    #     )
+    #
+    #     # Get data
+    #     data = raw_mne.get_data()
+    #
+    #     # Generate maps
+    #     maps = []
+    #     for sample_idx in selected_samples:
+    #         vals = data[:, sample_idx]
+    #         img = self.create_topographic_map(vals, self.pos_2d)
+    #         maps.append(img)
+    #
+    #     # Calculate GFP for visualization
+    #     gfp = np.std(data, axis=0)
+    #
+    #     self.sampling_indices = selected_samples
+    #     self.gfp_curve = gfp
+    #
+    #     return np.array(maps)
 
     # =========================================================================
     # Visualization Helpers
