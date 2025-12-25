@@ -1,10 +1,12 @@
 #!/bin/bash
 #SBATCH --partition=datamite
 #SBATCH --gres=gpu:2
-#SBATCH --constraint="gpu:1|gpu:2"  # ADD THIS LINE - restricts to GPU1 and GPU2
 #SBATCH --job-name=my_training
 #SBATCH --time=24:00:00
 #SBATCH --mem=100G
+
+# Force use of only GPU1 and GPU2
+export CUDA_VISIBLE_DEVICES=1,2
 
 # if [ -f "outputs" ]; then
 # 	echo "Removing existing outputs..."
