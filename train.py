@@ -98,10 +98,9 @@ def _train_worker_function(
         #     device = torch.device("cuda:0")
         #     logger.info(f"Task {task_id} using GPU {gpu_id} (mapped to cuda:0)")
         if num_gpus > 0:
-            gpu_id = available_gpu_ids[(task_id + 1) % len(available_gpu_ids)]
-            os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
-            device = torch.device("cuda:0")
-            logger.info(f"Task {task_id} using GPU {gpu_id} (mapped to cuda:0)")
+            gpu_index = task_id % num_gpus  # Will cycle between 0 and 1
+            device = torch.device(f"cuda:{gpu_index}")
+            logger.info(f"Task {task_id} using visible GPU index {gpu_index}")            logger.info(f"Task {task_id} using GPU {gpu_id} (mapped to cuda:0)")
         else:
             os.environ["CUDA_VISIBLE_DEVICES"] = ""
             device = torch.device("cpu")
@@ -350,23 +349,10 @@ class TrainingOrchestrator:
 
     def _train_parallel(self, param_combinations, *args) -> List[Dict]:
         """Execute parallel training with GPU assignment and robust cleanup"""
-        max_gpus = 10
-
         if torch.cuda.is_available():
-            available_gpus = torch.cuda.device_count()
-            num_gpus = min(available_gpus, max_gpus)
-            gpu_info = self._get_gpu_utilization()
-            if gpu_info:
-                gpu_info.sort(key=lambda x: x["utilization"] + x["memory_used_percent"])
-                available_gpu_ids = [
-                    gpu["id"]
-                    for gpu in gpu_info
-                    if gpu["utilization"] < 80 and gpu["memory_used_percent"] < 80
-                ][:max_gpus]
-                logger.info(f"Selected GPUs: {available_gpu_ids}")
-            else:
-                available_gpu_ids = list(range(num_gpus))
-                logger.info(f"Using default GPUs: {available_gpu_ids}")
+            num_gpus = torch.cuda.device_count()  # Will be 2
+            available_gpu_ids = list(range(num_gpus))  # [0, 1] - these map to physical GPU1,GPU2
+            logger.info(f"Using {num_gpus} GPUs with indices: {available_gpu_ids}")
         else:
             num_gpus = 0
             available_gpu_ids = []
@@ -385,7 +371,6 @@ class TrainingOrchestrator:
 
         train_loader, val_loader, test_loader, train_set, n_channels = args
 
-        # ✅ CRITICAL FIX: Extract datasets instead of passing DataLoaders
         train_dataset = train_loader.dataset
         val_dataset = val_loader.dataset
         test_dataset = test_loader.dataset
