@@ -100,7 +100,7 @@ def _train_worker_function(
         if num_gpus > 0:
             gpu_index = task_id % num_gpus  # Will cycle between 0 and 1
             device = torch.device(f"cuda:{gpu_index}")
-            logger.info(f"Task {task_id} using visible GPU index {gpu_index}")            logger.info(f"Task {task_id} using GPU {gpu_id} (mapped to cuda:0)")
+            logger.info(f"Task {task_id} using visible GPU index {gpu_index}")
         else:
             os.environ["CUDA_VISIBLE_DEVICES"] = ""
             device = torch.device("cpu")
@@ -351,7 +351,9 @@ class TrainingOrchestrator:
         """Execute parallel training with GPU assignment and robust cleanup"""
         if torch.cuda.is_available():
             num_gpus = torch.cuda.device_count()  # Will be 2
-            available_gpu_ids = list(range(num_gpus))  # [0, 1] - these map to physical GPU1,GPU2
+            available_gpu_ids = list(
+                range(num_gpus)
+            )  # [0, 1] - these map to physical GPU1,GPU2
             logger.info(f"Using {num_gpus} GPUs with indices: {available_gpu_ids}")
         else:
             num_gpus = 0
