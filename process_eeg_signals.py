@@ -1,11 +1,7 @@
 #!/usr/bin/env python3
 """
-Advanced Research EEG Processor for Microstate Analysis
+EEG Processor for Microstate Analysis
 -------------------------------------------------------
-Complete implementation with 12 publication-ready visualizations
-Backend: Agg (Non-interactive, saves files only)
-Visualization: MNE Standard (Head outlines, sensors)
-Data Source: Automagically downloads DEAP dataset from Google Drive if missing.
 """
 
 import sys
@@ -14,8 +10,6 @@ import pickle
 import logging
 import warnings
 import math as m
-import shutil
-from datetime import datetime
 from pathlib import Path
 
 # External Dependencies for Downloading
@@ -37,7 +31,7 @@ from scipy.interpolate import griddata
 
 # EEG
 import mne
-from pycrostates.preprocessing import extract_gfp_peaks, apply_spatial_filter
+from pycrostates.preprocessing import extract_gfp_peaks
 
 # Deep Learning
 import torch as T
@@ -47,10 +41,6 @@ from torch.utils.data import DataLoader, TensorDataset, random_split
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),  # Force output to stdout
-        logging.FileHandler("eeg_processing.log"),  # Log to file as well
-    ],
 )
 logger = logging.getLogger("eeg_processor")
 
@@ -85,7 +75,7 @@ class VaeDatasets:
 
 class EEGProcessor:
     """
-    Advanced EEG processing pipeline for microstate analysis.
+    EEG processing pipeline for microstate analysis.
 
     Features:
     - Automatic Google Drive Data Downloading
@@ -272,23 +262,37 @@ class EEGProcessor:
                 data_dict = pickle.load(f, encoding="latin1")
 
             data = data_dict["data"]
+            # Shape is (40, 32, 8064) = (Trials, Channels, Time)
             eeg_data = data[:, :32, :]
-            n_trials, n_channels, n_timepoints = eeg_data.shape
+            self.logger.info("Applying filter to individual trials before splicing...")
+            info = mne.create_info(
+                ch_names=self.STANDARD_CH_NAMES,
+                sfreq=self.config.get("sample_freq", 128),
+                ch_types="eeg",
+            )
 
-            self.raw_data_structure = eeg_data
+            epochs = mne.EpochsArray(eeg_data, info, verbose=False)
 
-            # Concatenate trials directly (NO PADDING)
-            reshaped_data = eeg_data.reshape(n_channels, -1)
+            epochs.filter(
+                l_freq=2.0, h_freq=20.0, method="fir", phase="zero", verbose=False
+            )
 
+            eeg_data_filtered = epochs.get_data()
+            n_trials, n_channels, n_timepoints = eeg_data_filtered.shape
+            self.raw_data_structure = eeg_data_filtered
+            reshaped_data = eeg_data_filtered.transpose(1, 0, 2).reshape(n_channels, -1)
             self.logger.info(
-                f"Loaded {n_trials} trials, {n_channels} channels, "
-                f"{n_timepoints} timepoints/trial (no padding)"
+                f"Loaded and filtered {n_trials} trials, {n_channels} channels, "
+                f"{n_timepoints} timepoints/trial"
             )
 
             return reshaped_data
 
         except Exception as e:
             self.logger.error(f"Error: {e}")
+            import traceback
+
+            traceback.print_exc()
             return None
 
     # =========================================================================
@@ -309,12 +313,6 @@ class EEGProcessor:
         # Set montage
         montage = mne.channels.make_standard_montage("biosemi32")
         raw.set_montage(montage)
-
-        # Setting filtering for Microstate Signals
-        # 2-20Hz is standard for microstate analysis
-        raw.filter(
-            l_freq=2.0, h_freq=20.0, method="fir", fir_design="firwin", phase="zero"
-        )
         self.logger.info("Applied 2-20 Hz bandpass filter")
 
         self.info = raw.info
@@ -375,96 +373,91 @@ class EEGProcessor:
         return interpolated
 
     def generate_topographic_maps(self, raw_mne):
-        """Generate topographic maps from GFP peaks."""
-        # Get electrode positions
+        """
+        Generate topographic maps using pycrostates.
+
+        Uses MNE Annotations to mark stitching boundaries as 'BAD'.
+        pycrostates automatically respects these annotations and skips the artifacts.
+        """
+        # Geometry Setup
         self.pos_3d = self.get_3d_coordinates(raw_mne.info["dig"])
         self.pos_2d = np.array([self.azim_proj(p) for p in self.pos_3d])
 
-        # Extract GFP peaks
-        self.logger.info("Extracting GFP peaks...")
-        # This returns a ChData object containing the maps at peak times
-        gfp_peaks_structure = extract_gfp_peaks(raw_mne, min_peak_distance=3)
+        # Mark Stitching Artifacts using MNE Annotations
+        self.logger.info("Annotating stitching boundaries to be ignored...")
 
-        # Get the actual data (Channels x Peaks)
-        peak_maps_data = gfp_peaks_structure.get_data()  # Shape: (32, N_peaks)
+        n_trials = 40
+        total_samples = raw_mne.n_times
+        samples_per_trial = total_samples // n_trials
+
+        # Define a safety buffer around the cut (0.5 seconds)
+        # This removes the "jump" and the filter ringing
+        buffer_duration = 0.5
+
+        onsets = []
+        durations = []
+        descriptions = []
+
+        # Loop through every stitch point (between trials)
+        for i in range(1, n_trials):
+            stitch_sample = i * samples_per_trial
+            stitch_time = stitch_sample / self.sfreq
+
+            # Start the "BAD" segment 0.5s before the stitch
+            onsets.append(stitch_time - buffer_duration)
+
+            # Duration is 1.0s total (0.5 before + 0.5 after)
+            durations.append(buffer_duration * 2)
+
+            # 'BAD_' prefix tells MNE/pycrostates to ignore this region
+            descriptions.append("BAD_boundary")
+
+        # Apply annotations to the Raw object
+        stitch_annotations = mne.Annotations(
+            onset=onsets, duration=durations, description=descriptions
+        )
+        raw_mne.set_annotations(stitch_annotations)
+        self.logger.info(f"Added {len(onsets)} 'BAD_boundary' annotations.")
+
+        #  Extract GFP Peaks using the Library
+        self.logger.info("Extracting GFP peaks using pycrostates...")
+
+        # reject_by_annotation=True (default) ensures artifacts are skipped
+        gfp_peaks_structure = extract_gfp_peaks(
+            raw_mne, min_peak_distance=3, reject_by_annotation=True
+        )
+
+        #  Get Data and Downsample
+        peak_maps_data = gfp_peaks_structure.get_data()
         n_peaks = peak_maps_data.shape[1]
+        self.logger.info(f"Found {n_peaks} clean GFP peaks")
 
-        self.logger.info(f"Found {n_peaks} GFP peaks")
-
-        # Sampling if too many peaks
         max_samples = self.config.get("max_topo_samples", 500000)
         if n_peaks > max_samples:
-            # Randomly select column indices
             selected_indices = np.random.choice(n_peaks, max_samples, replace=False)
             selected_indices.sort()
-            # Select specific columns (peaks)
             selected_data = peak_maps_data[:, selected_indices]
         else:
             selected_data = peak_maps_data
 
-        self.logger.info(
-            f"Generating maps from {selected_data.shape[1]} selected peaks"
-        )
-
-        # Generate maps (Interpolation)
+        #  Generate Maps (Interpolation)
+        self.logger.info(f"Interpolating {selected_data.shape[1]} maps...")
         maps = []
-        # Iterate over the columns (peaks)
         for i in range(selected_data.shape[1]):
-            vals = selected_data[:, i]  # Get all channels for this peak
+            vals = selected_data[:, i]
             img = self.create_topographic_map(vals, self.pos_2d)
             maps.append(img)
 
-        # Calculate GFP for visualization (using original raw data for the curve)
+        #  Store GFP Curve for Visualization
+        # We calculate this manually just for the Figure 2 plot
         full_data = raw_mne.get_data()
         self.gfp_curve = np.std(full_data, axis=0)
+
+        # We leave this empty as mapping exact indices back from
+        # the cleaned structure to the raw plot is complex and purely cosmetic
         self.sampling_indices = []
 
         return np.array(maps)
-
-    # def generate_topographic_maps(self, raw_mne):
-    #     """Generate topographic maps from GFP peaks."""
-    #     # Get electrode positions
-    #     self.pos_3d = self.get_3d_coordinates(raw_mne.info["dig"])
-    #     self.pos_2d = np.array([self.azim_proj(p) for p in self.pos_3d])
-    #
-    #     # Extract GFP peaks
-    #     self.logger.info("Extracting GFP peaks...")
-    #     gfp_peaks_raw = extract_gfp_peaks(raw_mne, min_peak_distance=3)
-    #
-    #     # Get peak indices
-    #     peak_samples = gfp_peaks_raw.get_data().flatten().astype(int)
-    #     self.logger.info(f"Found {len(peak_samples)} GFP peaks")
-    #
-    #     max_samples = self.config.get("max_topo_samples", 50000)
-    #     if len(peak_samples) > max_samples:
-    #         selected = np.random.choice(len(peak_samples), max_samples, replace=False)
-    #         selected.sort()
-    #         selected_samples = peak_samples[selected]
-    #     else:
-    #         selected_samples = peak_samples
-    #
-    #     self.logger.info(
-    #         f"Generating {len(selected_samples)} maps from "
-    #         f"{len(peak_samples)} GFP peaks (standard approach)"
-    #     )
-    #
-    #     # Get data
-    #     data = raw_mne.get_data()
-    #
-    #     # Generate maps
-    #     maps = []
-    #     for sample_idx in selected_samples:
-    #         vals = data[:, sample_idx]
-    #         img = self.create_topographic_map(vals, self.pos_2d)
-    #         maps.append(img)
-    #
-    #     # Calculate GFP for visualization
-    #     gfp = np.std(data, axis=0)
-    #
-    #     self.sampling_indices = selected_samples
-    #     self.gfp_curve = gfp
-    #
-    #     return np.array(maps)
 
     # =========================================================================
     # Visualization Helpers
@@ -506,11 +499,11 @@ class EEGProcessor:
         self.logger.info(f"Saved {fig_name}")
 
     # =========================================================================
-    # Publication-Ready Visualizations (12 Figures)
+    # Visualizations (12 Figures)
     # =========================================================================
 
-    def generate_research_figures(self, topo_maps, raw_dataset):
-        """Generate all 12 publication-ready figures."""
+    def generate_figures(self, topo_maps, raw_dataset):
+        """Generate all figures."""
         self.logger.info("=" * 60)
         self.logger.info("Generating 12 Publication-Ready Visualizations")
         self.logger.info("=" * 60)
@@ -974,53 +967,90 @@ class EEGProcessor:
     # Data Preparation for Deep Learning
     # =========================================================================
 
-    def normalize_and_prepare_data(self, topo_maps):
-        """Normalize topographic maps and prepare for deep learning."""
-        # Robust normalization using percentiles
-        p1, p99 = np.percentile(topo_maps, [1, 99])
-        topo_maps = np.clip(topo_maps, p1, p99)
+    def prepare_and_split_data(self, topo_maps):
+        """
+        Data splitting and normalization.
+        """
+        # Chronological Split (70% Train, 20% Val, 10% Test)
+        total_samples = len(topo_maps)
+        train_end = int(0.70 * total_samples)
+        val_end = int(0.90 * total_samples)
 
-        # Min-max normalization
-        d_min, d_max = topo_maps.min(), topo_maps.max()
-        if d_max - d_min > 0:
-            topo_maps = (topo_maps - d_min) / (d_max - d_min)
-
-        self.logger.info(
-            f"Normalized data: min={topo_maps.min():.4f}, "
-            f"max={topo_maps.max():.4f}, mean={topo_maps.mean():.4f}"
-        )
-        return topo_maps
-
-    def create_dataloaders(self, topo_maps):
-        """Create train/validation/test dataloaders."""
-        data_torch = topo_maps.reshape(-1, 1, self.topo_map_size, self.topo_map_size)
-        tensor_x = T.tensor(data_torch, dtype=T.float32)
-        tensor_y = T.zeros(len(tensor_x))
-        dataset = TensorDataset(tensor_x, tensor_y)
-
-        train_len = int(0.7 * len(dataset))
-        val_len = int(0.2 * len(dataset))
-        test_len = len(dataset) - train_len - val_len
-
-        train, val, test = random_split(dataset, [train_len, val_len, test_len])
-        batch_size = self.config["batch_size"]
-
-        train_loader = DataLoader(
-            train, batch_size=batch_size, shuffle=True, drop_last=True
-        )
-        val_loader = DataLoader(
-            val, batch_size=batch_size, shuffle=False, drop_last=True
-        )
-        test_loader = DataLoader(
-            test, batch_size=batch_size, shuffle=False, drop_last=True
-        )
+        # We keep the data as numpy arrays for now to do the math easily
+        X_train = topo_maps[:train_end]
+        X_val = topo_maps[train_end:val_end]
+        X_test = topo_maps[val_end:]
 
         self.logger.info(
-            f"Created dataloaders: Train={len(train)}, "
-            f"Val={len(val)}, Test={len(test)}"
+            f"Splitting Data (Chronological): Train={len(X_train)}, Val={len(X_val)}, Test={len(X_test)}"
         )
 
-        return VaeDatasets(train_loader, val_loader, test_loader, train)
+        # Compute Normalization Stats on TRAIN ONLY
+        # Robust scaling: Use percentiles to avoid outliers (artifacts) skewing the scale
+        p1 = np.percentile(X_train, 1)
+        p99 = np.percentile(X_train, 99)
+
+        # Calculate min/max based on these robust bounds (optional, or just use min/max of clipped)
+        # Here we clip first, then min-max normalize
+
+        def apply_norm(data, p_low, p_high, d_min=None, d_max=None):
+            # Clip to robust range
+            data_clipped = np.clip(data, p_low, p_high)
+
+            # If measuring stats (Train set)
+            if d_min is None:
+                d_min = data_clipped.min()
+                d_max = data_clipped.max()
+
+            # Prevent division by zero
+            denom = d_max - d_min
+            if denom == 0:
+                denom = 1e-8
+
+            # Normalize
+            data_norm = (data_clipped - d_min) / denom
+            return data_norm, d_min, d_max
+
+        # Apply to Train
+        X_train_norm, train_min, train_max = apply_norm(X_train, p1, p99)
+
+        # Apply to Val and Test using TRAIN stats
+        X_val_norm, _, _ = apply_norm(X_val, p1, p99, train_min, train_max)
+        X_test_norm, _, _ = apply_norm(X_test, p1, p99, train_min, train_max)
+
+        self.logger.info(
+            f"Normalization Stats (Train): Min={train_min:.3f}, Max={train_max:.3f}"
+        )
+
+        return X_train_norm, X_val_norm, X_test_norm
+
+    def create_dataloaders(self, X_train, X_val, X_test):
+        """Create PyTorch dataloaders from pre-split arrays."""
+
+        def to_loader(data_array, shuffle_mode):
+            # Reshape for CNN/VAE: (N, 1, 40, 40)
+            data_torch = data_array.reshape(
+                -1, 1, self.topo_map_size, self.topo_map_size
+            )
+            tensor_x = T.tensor(data_torch, dtype=T.float32)
+            tensor_y = T.zeros(len(tensor_x))
+            dataset = TensorDataset(tensor_x, tensor_y)
+            return DataLoader(
+                dataset,
+                batch_size=self.config["batch_size"],
+                shuffle=shuffle_mode,
+                drop_last=True,
+            )
+
+        # Train loader is shuffled (for SGD), but Val/Test are sequential
+        train_loader = to_loader(X_train, shuffle_mode=True)
+        val_loader = to_loader(X_val, shuffle_mode=False)
+        test_loader = to_loader(X_test, shuffle_mode=False)
+
+        # We need to return the train_dataset explicitly for some training loops
+        train_dataset = train_loader.dataset
+
+        return VaeDatasets(train_loader, val_loader, test_loader, train_dataset)
 
     # =========================================================================
     # Main Processing Pipeline
@@ -1037,21 +1067,21 @@ class EEGProcessor:
         self.logger.info(f"Processing Participant: {self.participant_id}")
         self.logger.info("=" * 60)
 
-        # Step 1: Check data availability (and Download if needed)
+        # Check data availability (and Download if needed)
         self.check_and_download_data()
 
-        # Step 2: Load data
+        #  Load data
         self.logger.info("Step 1/5: Loading data...")
         # Note: We load the .dat file that was verified/downloaded in Step 1
         raw_data = self.load_preprocessed_dat(self.config["data_path"])
         if raw_data is None:
             raise ValueError("Data loading failed")
 
-        # Step 3: Create MNE objects
+        #  Create MNE objects
         self.logger.info("Step 2/5: Creating MNE objects...")
         raw_mne = self.create_mne_raw_object(raw_data, apply_filter=True)
 
-        # Step 4: Generate topographic maps
+        #  Generate topographic maps
         self.logger.info("Step 3/5: Generating topographic maps...")
         topo_maps = self.generate_topographic_maps(raw_mne)
 
@@ -1060,16 +1090,16 @@ class EEGProcessor:
         np.save(output_path / "topo_maps.npy", topo_maps)
         self.logger.info(f"Saved {len(topo_maps)} topographic maps")
 
-        # Step 5: Normalize and prepare data
+        #  Normalize and prepare data
         self.logger.info("Step 4/5: Normalizing data...")
-        topo_maps_normalized = self.normalize_and_prepare_data(topo_maps)
+        X_train, X_val, X_test = self.prepare_and_split_data(topo_maps)
 
-        # Step 6: Generate visualizations
+        #  Generate visualizations
         self.logger.info("Step 5/5: Generating visualizations...")
-        self.generate_research_figures(topo_maps_normalized, raw_data)
+        self.generate_figures(X_train, raw_data)
 
         # Create dataloaders
-        vae_datasets = self.create_dataloaders(topo_maps_normalized)
+        vae_datasets = self.create_dataloaders(X_train, X_val, X_test)
 
         self.logger.info("=" * 60)
         self.logger.info("Processing Complete!")

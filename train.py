@@ -309,7 +309,7 @@ class TrainingOrchestrator:
 
     def _get_param_ranges(self) -> List[Tuple[int, int, int]]:
         """Determine ranges for n_channels and latent_dim"""
-        cluster_range = [8]
+        cluster_range = [3, 20]
         batch_size_range = [128]
         latent_dim_range = [32]
         param_combinations = list(
