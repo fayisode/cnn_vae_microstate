@@ -231,13 +231,13 @@ class LossBalancer:
         self,
         init_beta: float = 0.001,
         min_beta: float = 0,
-        max_beta: float = 0.6,
+        max_beta: float = 0.0001,
         beta_warmup_epochs: int = 60,
         adaptive_weight: bool = False,
         use_batch_cyclical: bool = False,
         n_cycles_per_epoch: int = 3,
         cycle_ratio: float = 0.5,
-        gamma: float = 0.05,
+        gamma: float = 0.005,
     ):
         self.init_beta = init_beta
         self.min_beta = min_beta
