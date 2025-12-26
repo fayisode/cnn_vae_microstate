@@ -127,7 +127,7 @@ class VAEClusteringTrainer:
         )
         self.lr = config.get("learning_rate", 1e-3)
         self.epochs = config.get("epochs", 100)
-        self.patience = config.get("patience", 10)
+        self.patience = config.get("patience", 30)
         self.pretrain_epochs = config.get("pretrain_epochs", 30)
         self.unfreeze_prior_epoch = config.get("unfreeze_prior_epoch", 1)
         # self.unfreeze_prior_epoch = config.get(
