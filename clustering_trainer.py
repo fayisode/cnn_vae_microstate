@@ -1494,7 +1494,9 @@ class VAEClusteringTrainer:
             self.pretrain()
             self.train_and_evaluate()
             topo_dir = str(self.output_dir / "final_cluster_topomaps")
-            self.model.get_cluster_centroids_and_visualize(output_dir=topo_dir)
+            self.model.perform_research_analysis(
+                data_loader=self.train_loader, output_dir=topo_dir
+            )
             self.run_explainability()
             self.run_deep_diagnostics()
             final_metrics = self.run_final_comparison()
@@ -1649,15 +1651,42 @@ class VAEClusteringTrainer:
         montage = mne.channels.make_standard_montage("biosemi32")
         info.set_montage(montage)
 
-        # Helper to map 40x40 -> 32 sensors (Reused from previous step)
+        # Helper to map 40x40 -> 32 sensors
         def extract_sensors_fast(img):
-            # ... (Reuse the extraction logic from previous answer, or define here)
-            # Simplified placeholder logic if the helper isn't globally available:
-            # You essentially need to sample the 40x40 grid at electrode coordinates.
-            # Assuming you have the extract_sensors function available or paste it here.
-            # For robustness, let's use a dummy extraction if not available,
-            # but ideally use the one from the Explainability step.
-            return img.flatten()[:32]  # Placeholder! Replace with real extraction logic
+            # This replicates the logic used in run_explainability
+            # assuming 'montage' and 'ch_names' are available in scope
+            import math as m
+
+            pos_3d = []
+            for ch in ch_names:
+                if ch in montage.get_positions()["ch_pos"]:
+                    pos_3d.append(montage.get_positions()["ch_pos"][ch])
+
+            pos_2d = []
+            for x, y, z in pos_3d:
+                r = m.sqrt(x**2 + y**2 + z**2)
+                elev = m.atan2(z, m.sqrt(x**2 + y**2))
+                az = m.atan2(y, x)
+                r_proj = m.pi / 2 - elev
+                pos_2d.append([r_proj * m.cos(az), r_proj * m.sin(az)])
+
+            pos_2d = np.array(pos_2d)
+            p_min, p_max = pos_2d.min(axis=0), pos_2d.max(axis=0)
+
+            sensor_vals = []
+            height, width = img.shape
+            for px, py in pos_2d:
+                nx = (px - p_min[0]) / (p_max[0] - p_min[0])
+                ny = (py - p_min[1]) / (p_max[1] - p_min[1])
+
+                # Map to pixels
+                ix = int(nx * (width - 1))
+                iy = int((1 - ny) * (height - 1))
+                ix = np.clip(ix, 0, width - 1)
+                iy = np.clip(iy, 0, height - 1)
+                sensor_vals.append(img[iy, ix])
+
+            return np.array(sensor_vals)
 
         # Traversal parameters
         n_steps = 7

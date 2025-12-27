@@ -146,84 +146,7 @@ class Decoder(nn.Module):
     def forward(self, z: torch.Tensor) -> torch.Tensor:
         decoder_input = self.decoder_input(z)
         decoder_input = decoder_input.view(-1, 1024, 1, 1)
-        # decoder_input = decoder_input.view(-1, 1024, 1, 1)
         return self.decoder(decoder_input)
-
-
-#
-# class Encoder(nn.Module):
-#     def __init__(self, nc: int, ndf: int, latent_dim: int):
-#         super().__init__()
-#         self.nc = nc
-#         self.ndf = ndf
-#         self.latent_dim = latent_dim
-#         self.encoder = nn.Sequential(
-#             nn.Conv2d(nc, ndf, 4, 2, 1, bias=False),
-#             nn.LeakyReLU(0.2, inplace=True),
-#             nn.Dropout(0.2),
-#             nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
-#             nn.BatchNorm2d(ndf * 2),
-#             nn.LeakyReLU(0.2, inplace=True),
-#             nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),
-#             nn.BatchNorm2d(ndf * 4),
-#             nn.LeakyReLU(0.2, inplace=True),
-#             nn.Dropout(0.2),
-#             nn.Conv2d(ndf * 4, ndf * 8, 3, 1, 1, bias=False),
-#             nn.BatchNorm2d(ndf * 8),
-#             nn.LeakyReLU(0.2, inplace=True),
-#             nn.Conv2d(ndf * 8, 1024, 5, 1, 0, bias=False),
-#             nn.LeakyReLU(0.2, inplace=True),
-#         )
-#         self.fc1 = nn.Linear(1024, 512)
-#         self.fc21 = nn.Linear(512, latent_dim)
-#         self.fc22 = nn.Linear(512, latent_dim)
-#
-#     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-#         conv = self.encoder(x)
-#         h1 = self.fc1(conv.view(-1, 1024))
-#         return self.fc21(h1), self.fc22(h1)
-#
-#
-# class Decoder(nn.Module):
-#     def __init__(self, ngf: int, nc: int, latent_dim: int):
-#         super().__init__()
-#         self.ngf = ngf
-#         self.nc = nc
-#         self.latent_dim = latent_dim
-#         self.decoder_input = nn.Sequential(
-#             nn.Linear(latent_dim, 512),
-#             nn.LeakyReLU(0.2, inplace=True),
-#             nn.Linear(512, 1024),
-#             nn.LeakyReLU(0.2, inplace=True),
-#         )
-#         self.decoder = nn.Sequential(
-#             nn.ConvTranspose2d(1024, ngf * 8, 5, 1, 0, bias=False),
-#             nn.BatchNorm2d(ngf * 8),
-#             nn.LeakyReLU(0.2, inplace=True),
-#             nn.Dropout(0.2),
-#             nn.ConvTranspose2d(ngf * 8, ngf * 4, 3, 1, 1, bias=False),
-#             nn.BatchNorm2d(ngf * 4),
-#             nn.LeakyReLU(0.2, inplace=True),
-#             nn.ConvTranspose2d(ngf * 4, ngf * 2, 4, 2, 1, bias=False),
-#             nn.BatchNorm2d(ngf * 2),
-#             nn.LeakyReLU(0.2, inplace=True),
-#             # nn.ConvTranspose2d(ngf * 2, ngf * 2, 3, 1, 1, bias=False),
-#             # nn.BatchNorm2d(ngf * 2),
-#             # nn.LeakyReLU(0.2, inplace=True),
-#             nn.ConvTranspose2d(ngf * 2, ngf, 4, 2, 1, bias=False),
-#             nn.BatchNorm2d(ngf),
-#             nn.LeakyReLU(0.2, inplace=True),
-#             # nn.ConvTranspose2d(ngf, ngf, 3, 1, 1, bias=False),
-#             # nn.BatchNorm2d(ngf),
-#             # nn.LeakyReLU(0.2, inplace=True),
-#             nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False),
-#             nn.Sigmoid(),
-#         )
-#
-#     def forward(self, z: torch.Tensor) -> torch.Tensor:
-#         decoder_input = self.decoder_input(z)
-#         decoder_input = decoder_input.view(-1, 1024, 1, 1)
-#         return self.decoder(decoder_input)
 
 
 class LossBalancer:
@@ -410,6 +333,48 @@ class MyModel(nn.Module):
         self.logger.info(
             f"📊 Trainer initialized with batch size: {batch_size} and latent dim: {latent_dim} and nClusters: {nClusters}"
         )
+
+        self._needs_data_init = True
+
+        ch_names = [
+            "Fp1",
+            "AF3",
+            "F7",
+            "F3",
+            "FC1",
+            "FC5",
+            "T7",
+            "C3",
+            "CP1",
+            "CP5",
+            "P7",
+            "P3",
+            "Pz",
+            "PO3",
+            "O1",
+            "Oz",
+            "O2",
+            "PO4",
+            "P4",
+            "P8",
+            "CP6",
+            "CP2",
+            "C4",
+            "T8",
+            "FC6",
+            "FC2",
+            "F4",
+            "F8",
+            "AF4",
+            "Fp2",
+            "Fz",
+            "Cz",
+        ]
+        self.info = mne.create_info(ch_names=ch_names, sfreq=128, ch_types="eeg")
+        montage = mne.channels.make_standard_montage("biosemi32")
+        self.info.set_montage(montage)
+        # ----------------------
+        self.logger.info(f"📊 Trainer initialized...")
 
     def monitor_kl_health(self, mu, log_var):
         with torch.no_grad():
@@ -626,117 +591,6 @@ class MyModel(nn.Module):
             reconstructed_x = torch.zeros_like(x)
             return reconstructed_x, mu, logvar
 
-    # def predict_robust(self, x: torch.Tensor) -> np.ndarray:
-    #     was_training = self.training
-    #     self.eval()
-    #
-    #     try:
-    #         with torch.no_grad():
-    #             z_mu, z_log_var = self.encode(x)
-    #
-    #             # Handle invalid values defensively
-    #             if torch.isnan(z_mu).any() or torch.isnan(z_log_var).any():
-    #                 self.logger.warning("NaN detected in encoder output")
-    #                 z_mu = torch.nan_to_num(z_mu, nan=0.0)
-    #                 z_log_var = torch.nan_to_num(z_log_var, nan=-1.0)
-    #
-    #             # Multiple sampling with majority vote (robust approach)
-    #             n_samples = 5
-    #             predictions = []
-    #
-    #             for _ in range(n_samples):
-    #                 # Correct sampling using your reparameterize method
-    #                 z = self.reparameterize(z_mu, z_log_var)
-    #                 z = torch.nan_to_num(z, nan=0.0)
-    #
-    #                 # Correct probability calculation (no double-log!)
-    #                 log_pi = self.pi_  # Already in log space
-    #                 log_probs = self.gaussian_pdfs_log(z, self.mu_c, self.log_var_c)
-    #
-    #                 # Clean probability computation
-    #                 log_yita_c = log_pi.unsqueeze(0) + log_probs
-    #                 yita_c = torch.exp(log_yita_c)
-    #                 yita_c = yita_c + 1e-8  # Numerical stability
-    #                 yita_c = yita_c / yita_c.sum(1, keepdim=True)  # Normalize
-    #
-    #                 pred = torch.argmax(yita_c, dim=1)
-    #                 predictions.append(pred.cpu().numpy())
-    #
-    #             # Majority vote across all samples
-    #             predictions = np.array(predictions)  # Shape: (n_samples, batch_size)
-    #             final_pred = []
-    #
-    #             for i in range(predictions.shape[1]):  # For each sample in batch
-    #                 sample_predictions = predictions[
-    #                     :, i
-    #                 ]  # All predictions for this sample
-    #                 values, counts = np.unique(sample_predictions, return_counts=True)
-    #                 most_common_pred = values[np.argmax(counts)]  # Majority vote
-    #                 final_pred.append(most_common_pred)
-    #
-    #             return np.array(final_pred)
-    #
-    #     except Exception as e:
-    #         self.logger.error(f"Critical prediction error: {e}")
-    #         # Fallback: return random predictions
-    #         return np.random.randint(0, self.nClusters, size=x.size(0))
-    #     finally:
-    #         if was_training:
-    #             self.train()
-
-    # def predict_robust(self, x: torch.Tensor) -> np.ndarray:
-    #     was_training = self.training
-    #     self.eval()
-    #     try:
-    #         with torch.no_grad():
-    #             z_mu, z_log_var = self.encode(x)
-    #             invalid_mask = (
-    #                 torch.isnan(z_mu)
-    #                 | torch.isinf(z_mu)
-    #                 | torch.isnan(z_log_var)
-    #                 | torch.isinf(z_log_var)
-    #             )
-    #             if invalid_mask.any():
-    #                 self.logger.warning(
-    #                     "NaN/Inf detected in encoder output; handling per sample"
-    #                 )
-    #                 z_mu = torch.where(invalid_mask, torch.zeros_like(z_mu), z_mu)
-    #             if (
-    #                 torch.isnan(self.mu_c).any()
-    #                 or torch.isinf(self.mu_c).any()
-    #                 or torch.isnan(self.log_var_c).any()
-    #                 or torch.isinf(self.log_var_c).any()
-    #                 or torch.isnan(self.pi_).any()
-    #                 or torch.isinf(self.pi_).any()
-    #             ):
-    #                 self.logger.error("Invalid cluster parameters - NaN/Inf detected")
-    #                 return np.random.randint(0, self.nClusters, size=x.size(0))
-    #             z = z_mu
-    #             log_pi = self.pi_
-    #             log_probs = self.gaussian_pdfs_log(z, self.mu_c, self.log_var_c)
-    #             if torch.isnan(log_probs).any() or torch.isinf(log_probs).any():
-    #                 self.logger.error("Invalid log probabilities")
-    #                 return np.random.randint(0, self.nClusters, size=x.size(0))
-    #             log_yita_c = log_pi.unsqueeze(0) + log_probs
-    #             log_yita_c = log_yita_c - torch.logsumexp(
-    #                 log_yita_c, dim=1, keepdim=True
-    #             )
-    #             yita_c = torch.exp(log_yita_c)
-    #             if torch.isnan(yita_c).any() or torch.isinf(yita_c).any():
-    #                 # self.logger.error("Invalid responsibilities")
-    #                 return np.random.randint(0, self.nClusters, size=x.size(0))
-    #             pred = torch.argmax(yita_c, dim=1)
-    #             self.logger.debug(
-    #                 f"Mean responsibilities: {yita_c.mean(dim=0).cpu().numpy()}"
-    #             )
-    #             return pred.cpu().numpy()
-    #     except Exception as e:
-    #         self.logger.error(f"Critical prediction error: {e}")
-    #         return np.random.randint(0, self.nClusters, size=x.size(0))
-    #     finally:
-    #         if was_training:
-    #             self.train()
-
     def predict_robust(self, x: torch.Tensor) -> np.ndarray:
         was_training = self.training
         self.eval()
@@ -783,75 +637,10 @@ class MyModel(nn.Module):
             if was_training:
                 self.train()
 
-    # def predict_robust(self, x: torch.Tensor) -> np.ndarray:
-    #     was_training = self.training
-    #     self.eval()
-    #     with torch.no_grad():
-    #         z_mu, z_log_var = self.encode(x)
-    #         n_samples = 5
-    #         predictions = []
-    #         for _ in range(n_samples):
-    #             z = torch.randn_like(z_mu) * torch.exp(z_log_var / 2) + z_mu
-    #             z = torch.nan_to_num(z, nan=0)
-    #             log_pi = self.pi_
-    #             log_sigma2_c = self.log_var_c
-    #             mu_c = self.mu_c
-    #             yita_c = torch.exp(
-    #                 log_pi.unsqueeze(0) + self.gaussian_pdfs_log(z, mu_c, log_sigma2_c)
-    #             )
-    #             yita_c = yita_c + 1e-8
-    #             yita_c = yita_c / yita_c.sum(1, keepdim=True)
-    #             pred = torch.argmax(yita_c, dim=1)
-    #             predictions.append(pred.cpu().numpy())
-    #         predictions = np.array(predictions)
-    #         final_pred = []
-    #         for i in range(predictions.shape[1]):
-    #             values, counts = np.unique(predictions[:, i], return_counts=True)
-    #             final_pred.append(values[np.argmax(counts)])
-    #         final_pred = np.array(final_pred)
-    #     if was_training:
-    #         self.train()
-    #     return final_pred
-
     def predict(self, x: torch.Tensor) -> np.ndarray:
-
-        # with torch.no_grad():
-        #     # Encode data to get latent representations
-        #     mu, _ = self.encode(x)
-        #
-        #     # Move to CPU and convert to numpy
-        #     latents = mu.cpu().numpy()
-        #
-        #     # Apply K-means clustering
-        #     from sklearn.cluster import KMeans
-        #
-        #     kmeans = KMeans(n_clusters=self.nClusters, random_state=42, n_init=10)
-        #     clusters = kmeans.fit_predict(latents)
         clusters = self.predict_robust(x)
 
-        # try:
-        #     with torch.no_grad():
-        #         # Get latent representations for silhouette calculation
-        #         mu, _ = self.encode(x)
-        #         latents = mu.cpu().numpy()
-        #
-        #         # Check if we have enough clusters for silhouette calculation
-        #         unique_clusters = np.unique(clusters)
-        #         if len(unique_clusters) >= 2 and len(clusters) >= 2:
-        #             from sklearn.metrics import silhouette_score
-        #
-        #             silhouette = silhouette_score(latents, clusters)
-        #             self.logger.info(f"    Silhouette score: {silhouette:.4f}")
-        #         else:
-        #             self.logger.info(
-        #                 f"    Silhouette score: N/A (only {len(unique_clusters)} clusters)"
-        #             )
-        #
-        # except Exception as e:
-        #     self.logger.warning(f"    Silhouette calculation failed: {e}")
-
         return clusters
-        # return self.predict_robust(x)
 
     def encode(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         return self.encoder(x)
@@ -871,9 +660,6 @@ class MyModel(nn.Module):
             x.view(-1, flat_size),
             reduction="sum",
         )
-        # if True:
-        #     batch_size = x.size(0)
-        #     return mse_loss / (batch_size * flat_size)
         return mse_loss
 
     def KLD(
@@ -907,12 +693,6 @@ class MyModel(nn.Module):
         entropy_term = 0.5 * torch.mean(torch.sum(1 + log_var, 1))
         loss = kl_first_term + kl_second_term - entropy_term
         loss = torch.max(loss, torch.tensor(EPSILON, device=loss.device))
-        # loss = torch.clamp(loss, min=0.1 * mu.size(1))
-        # loss = torch.clamp(loss)
-        # if True:
-        #     latent_dim = mu.size(1)
-        #     batch_size = mu.size(0)
-        #     return loss / (batch_size * latent_dim)
         return loss
 
     def KLD_with_free_bits(self, mu, log_var, free_bits_per_dim=0.5):
@@ -1008,219 +788,275 @@ class MyModel(nn.Module):
         return image * mask
 
     def get_cluster_centroids_and_visualize(self, output_dir: str = "images/clusters"):
+        """
+        Generates professional visualizations of the learned cluster centroids.
+        Saves both individual images (for slides/detailed analysis) and a merged grid (for papers).
+        """
+        import matplotlib.pyplot as plt
+        import mne
+        import os
+        import math
+
+        # 1. Setup Directories
         os.makedirs(output_dir, exist_ok=True)
-        latent_centroids = self.mu_c.detach().cpu()
+        indiv_dir = os.path.join(output_dir, "individual_maps")
+        os.makedirs(indiv_dir, exist_ok=True)
+
+        self.logger.info(f"🎨 Visualizing {self.nClusters} clusters...")
+
+        #  Decode Centroids (Latent -> Data Space)
         self.eval()
         with torch.no_grad():
-            decoded_centroids = self.decode(self.mu_c)
-        decoded_centroids_np = decoded_centroids.detach().cpu().numpy()
-        ch_names = [
-            "Fp1",
-            "AF3",
-            "F7",
-            "F3",
-            "FC1",
-            "FC5",
-            "T7",
-            "C3",
-            "CP1",
-            "CP5",
-            "P7",
-            "P3",
-            "Pz",
-            "PO3",
-            "O1",
-            "Oz",
-            "O2",
-            "PO4",
-            "P4",
-            "P8",
-            "CP6",
-            "CP2",
-            "C4",
-            "T8",
-            "FC6",
-            "FC2",
-            "F4",
-            "F8",
-            "AF4",
-            "Fp2",
-            "Fz",
-            "Cz",
-        ]
-        eeg_info = mne.create_info(ch_names=ch_names, sfreq=128, ch_types="eeg")
-        montage = mne.channels.make_standard_montage("biosemi32")
-        eeg_info.set_montage(montage)
-        channel_types = [None, "mag", "eeg", "grad"]
-        colormap_variants = {
-            "standard": LinearSegmentedColormap.from_list(
-                "custom_eeg_cmap",
-                [(0, 0, 0.8), (0, 1, 0.5), (1, 1, 0.8), (1, 0.5, 0), (0.8, 0, 0)],
-                N=100,
-            ),
-            "Spectral_r": "Spectral_r",
-            "RdBu_r": "RdBu_r",
-            "viridis": "viridis",
-            "plasma": "plasma",
-            "coolwarm": "coolwarm",
-            "jet": "jet",
-            "rainbow": "rainbow",
-        }
-        interp_methods = ["cubic", "linear", "nearest"]
-        img_shape = decoded_centroids_np[0].shape
-        self.logger.info(f"Decoded centroid shape: {img_shape}")
-        if len(img_shape) == 3:
-            channels, height, width = img_shape
-            self.logger.info(f"Processing multi-channel image with {channels} channels")
-        else:
-            height, width = img_shape
-            self.logger.info(
-                f"Processing single-channel image of size {height}x{width}"
-            )
-        center_x, center_y = width // 2, height // 2
-        if abs(height - width) > width * 0.1:
-            self.logger.warning(
-                f"Image is not square ({width}x{height}), which may affect visualization accuracy"
-            )
-        channel_values_all = []
+            decoded_centroids = self.decode(self.mu_c).detach().cpu().numpy()
+
+        #  Process Each Cluster
+        # We store processed maps to generate the grid later without re-processing
+        processed_maps = []
+
         for i in range(self.nClusters):
-            cluster_dir = os.path.join(output_dir, f"cluster_{i+1}")
-            os.makedirs(cluster_dir, exist_ok=True)
-            centroid_img = decoded_centroids_np[i]
-            if len(centroid_img.shape) == 3:
-                if centroid_img.shape[0] == 1:
-                    centroid_img = centroid_img.squeeze(0)
-                    self.logger.info("Using single channel from decoded centroid")
-                else:
-                    self.logger.warning(
-                        f"Multiple channels ({centroid_img.shape[0]}) detected in decoded centroid. Using the first channel by default."
-                    )
-                    centroid_img = centroid_img[0]
-            pos_3d = []
-            valid_ch_names = []
-            for ch_name in ch_names:
-                if ch_name in montage.get_positions()["ch_pos"]:
-                    ch_pos = montage.get_positions()["ch_pos"][ch_name]
-                    pos_3d.append(ch_pos)
-                    valid_ch_names.append(ch_name)
-                else:
-                    self.logger.warning(
-                        f"Channel {ch_name} not found in montage positions"
-                    )
-            self.logger.info(
-                f"Found {len(pos_3d)}/{len(ch_names)} channel positions in montage"
+            # A. Extract data (Handle 1D vectors vs 2D images)
+            # If your model outputs (1, 32, 1), flatten it.
+            # If it outputs images (1, 64, 64), you need a specific mapper (omitted for safety, assuming vector here)
+            raw_map = decoded_centroids[i].flatten()
+
+            # Safety check: Ensure data length matches channel info
+            if raw_map.shape[0] != len(self.info.ch_names):
+                # If sizes mismatch, try to slice (e.g., if output is 4096 but we need 32 channels)
+                # This assumes the first N elements are the channels
+                if raw_map.shape[0] > len(self.info.ch_names):
+                    raw_map = raw_map[: len(self.info.ch_names)]
+
+            current_map = raw_map.copy()
+
+            # B. Polarity Invariance Check (Standard Research Practice)
+            # If the strongest peak is negative (Blue), flip it to positive (Red).
+            # This ensures consistent visualization.
+            if np.abs(current_map.min()) > np.abs(current_map.max()):
+                current_map = -current_map
+
+            processed_maps.append(current_map)
+
+            # --- C. SAVE INDIVIDUAL IMAGE ---
+            fig, ax = plt.subplots(figsize=(5, 5))
+
+            # Plot
+            im, _ = mne.viz.plot_topomap(
+                current_map,
+                self.info,
+                axes=ax,
+                show=False,
+                contours=0,  # 0 = smooth gradient (modern look)
+                cmap="RdBu_r",  # Red-Blue Reversed (Red=Pos)
+                sensors=True,  # Show electrode dots
+                res=256,  # High resolution interpolation
+                outlines="head",
+                sphere="auto",
             )
 
-            def _azim_proj(pos):
-                [r, elev, az] = _cart2sph(pos[0], pos[1], pos[2])
-                return _pol2cart(az, m.pi / 2 - elev)
+            # Add Title and Colorbar
+            ax.set_title(f"Cluster {i+1}", fontsize=16, pad=20)
+            plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
-            def _cart2sph(x, y, z):
-                x2_y2 = x**2 + y**2
-                r = m.sqrt(x2_y2 + z**2)
-                elev = m.atan2(z, m.sqrt(x2_y2))
-                az = m.atan2(y, x)
-                return r, elev, az
+            # Save
+            save_name = os.path.join(indiv_dir, f"Cluster_{i+1:02d}.png")
+            plt.savefig(save_name, dpi=300, bbox_inches="tight")
+            plt.close()
 
-            def _pol2cart(theta, rho):
-                return rho * m.cos(theta), rho * m.sin(theta)
+        self.logger.info(f"✅ Saved {self.nClusters} individual maps to: {indiv_dir}")
 
-            pos_2d = []
-            for pos in pos_3d:
-                pos_2d.append(_azim_proj(pos))
-            pos_2d = np.array(pos_2d)
-            min_x, min_y = np.min(pos_2d, axis=0)
-            max_x, max_y = np.max(pos_2d, axis=0)
-            self.logger.info(
-                f"Electrode position range: X: [{min_x:.2f}, {max_x:.2f}], Y: [{min_y:.2f}, {max_y:.2f}]"
+        # -- SAVE MERGED GRID (Summary View) ---
+        n_cols = 4
+        n_rows = math.ceil(self.nClusters / n_cols)
+
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 3.5 * n_rows))
+        axes = axes.flatten()
+
+        for i in range(self.nClusters):
+            mne.viz.plot_topomap(
+                processed_maps[i],
+                self.info,
+                axes=axes[i],
+                show=False,
+                contours=0,
+                cmap="RdBu_r",
+                sensors=False,  # Hide dots on grid view for cleanliness
             )
-            channel_values = np.zeros(len(valid_ch_names))
-            channel_value_map = {}
-            for idx, ((x, y), ch_name) in enumerate(zip(pos_2d, valid_ch_names)):
-                norm_x = (x - min_x) / (max_x - min_x) * 2 - 1
-                norm_y = (y - min_y) / (max_y - min_y) * 2 - 1
-                radius = min(center_x, center_y) * 0.95
-                img_x = int(center_x + norm_x * radius)
-                img_y = int(center_y - norm_y * radius)
-                img_x = max(0, min(img_x, width - 1))
-                img_y = max(0, min(img_y, height - 1))
-                if idx < 5:
-                    self.logger.info(
-                        f"Electrode {ch_name}: Normalized ({norm_x:.2f}, {norm_y:.2f}) -> Image coordinates ({img_x}, {img_y})"
-                    )
-                channel_values[idx] = centroid_img[img_y, img_x]
-                channel_value_map[ch_name] = channel_values[idx]
-            value_examples = {
-                k: channel_value_map[k] for k in list(channel_value_map.keys())[:5]
-            }
-            self.logger.info(f"Sample extracted values: {value_examples}")
-            if np.any(np.isnan(channel_values)):
-                self.logger.warning("Found NaN values in extracted channel values")
-                channel_values = np.nan_to_num(channel_values, nan=0.0)
-            original_min = np.min(channel_values)
-            original_max = np.max(channel_values)
-            if original_max != original_min:
-                channel_values = (channel_values - original_min) / (
-                    original_max - original_min
-                ) * 2 - 1
-                self.logger.info(
-                    f"Normalized channel values from range [{original_min:.6f}, {original_max:.6f}] to [-1, 1]"
-                )
-            else:
-                self.logger.warning(
-                    f"All channel values are identical ({original_min}). This may indicate an issue with value extraction."
-                )
-            channel_values_all.append(channel_values)
-            for ch_type in channel_types:
-                for cmap_name, cmap in colormap_variants.items():
-                    for interp in interp_methods:
-                        if interp == "nearest" and cmap_name not in [
-                            "standard",
-                            "viridis",
-                            "RdBu_r",
-                        ]:
-                            continue
-                        plt.figure(figsize=(6, 6), facecolor="white")
-                        contours = 0 if interp == "nearest" else 7
-                        mne.viz.plot_topomap(
-                            channel_values,
-                            eeg_info,
-                            axes=plt.gca(),
-                            ch_type=ch_type,
-                            cmap=cmap,
-                            contours=contours,
-                            outlines="head",
-                            sensors=True,
-                            res=128,
-                            extrapolate="head",
-                            image_interp=interp,
-                            show=False,
-                        )
-                        ch_type_str = ch_type if ch_type else "default"
-                        title = plt.title(
-                            f"Cluster {i+1} - {ch_type_str} - {cmap_name} - {interp}",
-                            fontsize=12,
-                        )
-                        plt.tight_layout()
-                        plt.savefig(
-                            os.path.join(
-                                cluster_dir,
-                                f"cluster_{i+1}_{ch_type_str}_{cmap_name}_{interp}.png",
-                            ),
-                            dpi=300,
-                            bbox_inches="tight",
-                            facecolor="white",
-                        )
-                        plt.close()
-        results = {
-            "latent_centroids": latent_centroids.numpy(),
-            "decoded_centroids": decoded_centroids_np,
-            "channel_values": np.array(channel_values_all),
-        }
-        self.logger.info(
-            f"Visualization complete. Generated comprehensive visualizations for {self.nClusters} clusters in {output_dir}"
+            axes[i].set_title(f"Microstate {i+1}", fontsize=12)
+
+        # Hide empty slots
+        for i in range(self.nClusters, len(axes)):
+            axes[i].axis("off")
+
+        plt.suptitle(
+            f"Learned Microstate Templates (K={self.nClusters})", fontsize=16, y=0.98
         )
-        return results
+        plt.tight_layout()
+
+        grid_path = os.path.join(output_dir, "merged_centroids.png")
+        plt.savefig(grid_path, dpi=300, bbox_inches="tight")
+        plt.close()
+
+        self.logger.info(f"✅ Saved merged summary to: {grid_path}")
+
+    def perform_research_analysis(
+        self,
+        data_loader: torch.utils.data.DataLoader,
+        output_dir: str = "images/analysis",
+    ):
+        """
+        Generates comprehensive research statistics:
+        1. Global Explained Variance (GEV)
+        2. Temporal Dynamics (Mean Duration & Transition Matrix)
+        3. Cluster Occupancy
+        4. Latent Space Manifold (t-SNE)
+        """
+        import seaborn as sns  # Added missing import to fix crash
+        import matplotlib.pyplot as plt
+
+        os.makedirs(output_dir, exist_ok=True)
+        self.logger.info("🧪 Starting Research Analysis & Validation...")
+        self.get_cluster_centroids_and_visualize(output_dir=output_dir)
+        #  Aggregate Data (X), Latents (Z), and Predictions (Y) ---
+        self.eval()
+        X_list, Z_list, preds_list = [], [], []
+
+        # We need the decoded centroids to calculate GEV against original data
+        with torch.no_grad():
+            # Get centroids in data space (Decode the cluster means)
+            centroids_decoded = self.decode(self.mu_c).cpu().numpy()
+            # Handle shape if necessary (flatten channel/spatial dims for correlation)
+            centroids_flat = centroids_decoded.reshape(self.nClusters, -1)
+
+            for data, _ in tqdm(data_loader, desc="Aggregating Statistics"):
+                data = data.to(self.device)
+                mu, _ = self.encode(data)
+                preds = self.predict(data)
+
+                # Flatten data for correlation calculations
+                X_list.append(data.cpu().numpy().reshape(data.size(0), -1))
+                Z_list.append(mu.cpu().numpy())
+                preds_list.append(preds)
+
+        X = np.concatenate(X_list, axis=0)
+        Z = np.concatenate(Z_list, axis=0)
+        labels = np.concatenate(preds_list, axis=0)
+
+        #  Global Explained Variance (GEV) ---
+        # GEV = sum((GFP * Correlation)^2) / sum(GFP^2)
+        gfp = np.std(X, axis=1)
+        gfp_squared_sum = np.sum(gfp**2)
+
+        numerator = 0
+        for i in range(len(X)):
+            # Correlation between data vector and assigned microstate map
+            map_vector = centroids_flat[labels[i]]
+            data_vector = X[i]
+
+            # Pearson correlation
+            corr = np.corrcoef(data_vector, map_vector)[0, 1]
+            numerator += (gfp[i] * corr) ** 2
+
+        gev = numerator / gfp_squared_sum
+        self.logger.info(f"📊 Global Explained Variance (GEV): {gev:.4f}")
+
+        # Temporal Dynamics ---
+        # A. Mean Duration (ms)
+        fs = getattr(self.info, "sfreq", 128)  # Default to 128Hz if missing
+        durations = {i: [] for i in range(self.nClusters)}
+
+        curr_label = labels[0]
+        curr_dur = 0
+        for lab in labels:
+            if lab == curr_label:
+                curr_dur += 1
+            else:
+                durations[curr_label].append(
+                    curr_dur / fs * 1000
+                )  # Convert samples to ms
+                curr_label = lab
+                curr_dur = 1
+
+        mean_durs = [
+            np.mean(durations[i]) if durations[i] else 0 for i in range(self.nClusters)
+        ]
+
+        # B. Transition Probability Matrix
+        trans_matrix = np.zeros((self.nClusters, self.nClusters))
+        for i in range(len(labels) - 1):
+            if labels[i] != labels[i + 1]:
+                trans_matrix[labels[i], labels[i + 1]] += 1
+
+        # Normalize rows
+        row_sums = trans_matrix.sum(axis=1, keepdims=True)
+        trans_probs = np.divide(
+            trans_matrix, row_sums, out=np.zeros_like(trans_matrix), where=row_sums != 0
+        )
+
+        #  Visualization & Saving ---
+
+        # Plot 1: Occupancy
+        unique, counts = np.unique(labels, return_counts=True)
+        occupancy = counts / len(labels) * 100
+
+        plt.figure(figsize=(10, 6))
+        plt.subplot(1, 2, 1)
+        sns.barplot(x=[f"C{i+1}" for i in unique], y=occupancy, palette="viridis")
+        plt.title(f"Occupancy (GEV={gev:.2f})")
+        plt.ylabel("% Time Active")
+
+        # Plot 2: Mean Duration
+        plt.subplot(1, 2, 2)
+        sns.barplot(
+            x=[f"C{i+1}" for i in range(self.nClusters)], y=mean_durs, palette="magma"
+        )
+        plt.title("Mean Duration (ms)")
+        plt.ylabel("Time (ms)")
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, "temporal_stats.png"), dpi=300)
+        plt.close()
+
+        # Plot 3: Transition Matrix
+        plt.figure(figsize=(8, 7))
+        sns.heatmap(
+            trans_probs,
+            annot=True,
+            fmt=".2f",
+            cmap="Blues",
+            xticklabels=[f"C{i+1}" for i in range(self.nClusters)],
+            yticklabels=[f"C{i+1}" for i in range(self.nClusters)],
+        )
+        plt.title("Transition Probability Matrix")
+        plt.savefig(os.path.join(output_dir, "transition_matrix.png"), dpi=300)
+        plt.close()
+
+        # Plot 4: Latent Space (t-SNE)
+        # Downsample for t-SNE if dataset is huge (>5000 samples) to save time
+        if len(Z) > 5000:
+            idx = np.random.choice(len(Z), 5000, replace=False)
+            Z_vis = Z[idx]
+            labels_vis = labels[idx]
+        else:
+            Z_vis, labels_vis = Z, labels
+
+        tsne = TSNE(n_components=2, random_state=42, init="pca", learning_rate="auto")
+        z_2d = tsne.fit_transform(Z_vis)
+
+        plt.figure(figsize=(8, 8))
+        scatter = plt.scatter(
+            z_2d[:, 0], z_2d[:, 1], c=labels_vis, cmap="tab10", alpha=0.6, s=15
+        )
+        plt.colorbar(scatter, label="Cluster ID")
+        plt.title("Latent Manifold Topology")
+        plt.savefig(os.path.join(output_dir, "latent_manifold.png"), dpi=300)
+        plt.close()
+
+        # Save Text Stats
+        with open(os.path.join(output_dir, "research_stats.txt"), "w") as f:
+            f.write(f"Global Explained Variance (GEV): {gev:.5f}\n")
+            f.write("-" * 30 + "\n")
+            f.write("Mean Durations (ms):\n")
+            for i, dur in enumerate(mean_durs):
+                f.write(f"  Cluster {i+1}: {dur:.2f} ms\n")
 
     def pretrain(
         self,
@@ -1258,6 +1094,7 @@ class MyModel(nn.Module):
         }
         collapse_counter = 0
 
+        # --- RESUME LOGIC ---
         if pretrain_checkpoint_path and pretrain_checkpoint_path.exists():
             self.logger.info(f"Resuming pretraining from {pretrain_checkpoint_path}")
             checkpoint = torch.load(
@@ -1277,7 +1114,6 @@ class MyModel(nn.Module):
             )
 
         self.train()
-
         self.initialize_from_data(train_loader)
 
         if freeze_prior_epochs > 0 and start_epoch < freeze_prior_epochs:
@@ -1289,6 +1125,7 @@ class MyModel(nn.Module):
         step_count = start_step if phase == "gamma" else gamma_steps
         n_batches_per_epoch = len(train_loader)
 
+        # --- PHASE 1: GAMMA STEPS ---
         if phase == "gamma":
             self.logger.info(f"Starting/Resuming gamma steps from step {start_step}")
             gamma_progress_bar = tqdm(
@@ -1309,54 +1146,28 @@ class MyModel(nn.Module):
                         break
 
                     data = data.to(device)
-                    # data = (data - data.min()) / (data.max() - data.min() + EPSILON)
                     optimizer.zero_grad()
                     recon_batch, mu, logvar = self(data)
-                    # re_loss, kld_loss, loss = self.loss_function(
-                    #     recon_batch,
-                    #     data,
-                    #     mu,
-                    #     logvar,
-                    #     normalize=True,
-                    #     epoch=0,
-                    #     total_epochs=epochs + 1,
-                    #     batch_idx=batch_idx,
-                    #     n_batches_per_epoch=n_batches_per_epoch,
-                    #     is_pretraining=True,
-                    # )
-                    # Simple loss with fixed gamma (no complex balancing)
+
+                    # Simple pretraining loss
                     re_loss = self.RE(recon_batch, data)
                     kld_loss = self.KLD(mu, logvar)
-                    loss = re_loss + (1e-3 * kld_loss)  # Fixed gamma!
+                    loss = re_loss + (1e-3 * kld_loss)
+
                     loss.backward()
-                    # torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
                     optimizer.step()
 
                     if step_count % 50 == 0:
                         kl_healthy = self.monitor_kl_health(mu, logvar)
                         if not kl_healthy:
                             collapse_counter += 1
-                        # current_beta = (
-                        #     self.loss_balancer.get_beta(
-                        #         0, re_loss, kld_loss, batch_idx, n_batches_per_epoch
-                        #     )
-                        #     if self.use_batch_cyclical
-                        #     else self.loss_balancer.get_beta(0, re_loss, kld_loss)
-                        # )
+
                         current_lr = optimizer.param_groups[0]["lr"]
                         self.logger.info(
                             f"\n{'='*80}\n"
                             f"GAMMA STEP {step_count:4d} | LR: {current_lr:.2e}\n"
                             f"{'='*80}\n"
-                            f"🔄 Loss Components:\n"
-                            f"   └─ Reconstruction: {re_loss.item():8.6f}\n"
-                            f"   └─ KLD:           {kld_loss.item():8.6f}\n"
-                            f"   └─ Total:         {loss.item():8.6f}\n"
-                            f"   └─ Beta (γ):      {1e-5:8.6f}\n"
-                            f"📊 Health Status:\n"
-                            f"   └─ KL Healthy:    {'✅ Yes' if kl_healthy else '❌ No'}\n"
-                            f"   └─ Collapse Count: {collapse_counter}\n"
-                            f"{'='*80}\n"
+                            f"Loss: {loss.item():.4f} (RE: {re_loss.item():.4f}, KLD: {kld_loss.item():.4f})\n"
                         )
 
                     history["reconstruct_losses"].append(re_loss.item())
@@ -1381,13 +1192,14 @@ class MyModel(nn.Module):
                             pretrain_checkpoint_path,
                         )
 
-                if not gamma_complete:  # Reset dataloader for next pass if needed
+                if not gamma_complete:
                     self.logger.info("Restarting dataloader to continue gamma steps...")
 
             gamma_progress_bar.close()
             phase = "epochs"
             start_epoch = 0
 
+        # --- PHASE 2: EPOCH TRAINING ---
         if self.detect_posterior_collapse(train_loader, threshold=0.1):
             self.logger.warning(
                 "🚨 Collapse detected after gamma steps - adjusting parameters"
@@ -1401,17 +1213,14 @@ class MyModel(nn.Module):
             self.gradual_unfreeze(epoch)
             epoch_loss, reconstruct_loss, kld_loss_total = 0, 0, 0
             epoch_betas = []
-            sampled_mu, sampled_logvar = [], []
+
             for batch_idx, (data, _) in enumerate(
                 tqdm(train_loader, desc=f"Pretrain Epoch {epoch+1}")
             ):
                 data = data.to(device)
-                # data = (data - data.min()) / (data.max() - data.min() + EPSILON)
                 optimizer.zero_grad()
                 recon_batch, mu, logvar = self(data)
-                if batch_idx % 20 == 0:
-                    sampled_mu.append(mu.detach())
-                    sampled_logvar.append(logvar.detach())
+
                 re_loss, kld_loss, loss = self.loss_function(
                     recon_batch,
                     data,
@@ -1423,12 +1232,15 @@ class MyModel(nn.Module):
                     batch_idx=batch_idx,
                     n_batches_per_epoch=n_batches_per_epoch,
                 )
+
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
                 optimizer.step()
+
                 epoch_loss += loss.item()
                 reconstruct_loss += re_loss.item()
                 kld_loss_total += kld_loss.item()
+
                 if self.use_batch_cyclical:
                     current_beta = self.loss_balancer.get_beta(
                         epoch + 1, re_loss, kld_loss, batch_idx, n_batches_per_epoch
@@ -1436,52 +1248,12 @@ class MyModel(nn.Module):
                     epoch_betas.append(current_beta)
 
             avg_loss = epoch_loss / len(train_loader)
-            avg_re_loss = reconstruct_loss / len(train_loader)
-            avg_kld_loss = kld_loss_total / len(train_loader)
             avg_beta = np.mean(epoch_betas) if epoch_betas else 0.0
 
-            if sampled_mu:
-                epoch_mu, epoch_logvar = torch.cat(sampled_mu, 0), torch.cat(
-                    sampled_logvar, 0
-                )
-                kl_healthy = self.monitor_kl_health(epoch_mu, epoch_logvar)
-                if not kl_healthy:
-                    collapse_counter += 1
-
-            if self.detect_posterior_collapse(train_loader, threshold=0.1):
-                self.logger.warning(f"🚨 Collapse detected at epoch {epoch}")
-                self.loss_balancer.min_beta = max(
-                    0.001, self.loss_balancer.min_beta * 0.5
-                )
-                self.loss_balancer.max_beta = max(
-                    0.1, self.loss_balancer.max_beta * 0.7
-                )
-                self.loss_balancer.gamma = max(0.001, self.loss_balancer.gamma * 0.5)
-                collapse_counter += 1
-                self.loss_balancer.recon_avg, self.loss_balancer.kld_avg = None, None
-
             history["epoch_losses"].append(avg_loss)
-            history["reconstruct_losses"].append(avg_re_loss)
-            history["kld_losses"].append(avg_kld_loss)
             history["beta_values"].append(avg_beta)
-            # self.logger.info(
-            #     f"Epoch {epoch}: Loss: {avg_loss:.6f}, RE: {avg_re_loss:.6f}, "
-            #     f"KLD: {avg_kld_loss:.6f}, Avg Beta: {avg_beta:.4f}, "
-            #     f"Collapse Counter: {collapse_counter}"
-            # )
-            self.logger.info(
-                f"\n{'🚀 PRETRAIN EPOCH':<20} {epoch:3d} / {freeze_prior_epochs}\n"
-                f"{'─'*60}\n"
-                f"📊 Average Losses:\n"
-                f"   ├─ Total:          {avg_loss:10.6f}\n"
-                f"   ├─ Reconstruction: {avg_re_loss:10.6f}\n"
-                f"   ├─ KL Divergence:  {avg_kld_loss:10.6f}\n"
-                f"   └─ Beta (avg):     {avg_beta:10.6f}\n"
-                f"🏥 Health Metrics:\n"
-                f"   ├─ Collapse Count: {collapse_counter}\n"
-                f"   └─ Status:         {'⚠️  Unstable' if collapse_counter > 2 else '✅ Stable'}\n"
-                f"{'─'*60}\n"
-            )
+
+            self.logger.info(f"Epoch {epoch+1} Complete | Loss: {avg_loss:.4f}")
 
             if pretrain_checkpoint_path:
                 torch.save(
@@ -1498,87 +1270,93 @@ class MyModel(nn.Module):
                     pretrain_checkpoint_path,
                 )
 
-            if collapse_counter >= 5:
-                self.logger.error("🚨 TOO MANY COLLAPSES DETECTED - STOPPING TRAINING")
-                self.logger.error(
-                    "Consider: lower beta, different architecture, or data preprocessing"
-                )
-                break
-
         if freeze_prior_epochs > 0:
             self.gradual_unfreeze(freeze_prior_epochs)
 
-        k = round(len(train_loader) / 2)
-        subset_size = min(k * self.batch_size, len(train_set))
-        subset_indices = np.random.choice(
-            len(train_set), size=subset_size, replace=False
-        )
-        subset_loader = torch.utils.data.DataLoader(
-            torch.utils.data.Subset(train_set, subset_indices),
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=0,
-        )
-        Z, Y = [], []
+        # ---------------------------------------------------------
+        # HYBRID STRATEGY: Try 100%, Fallback to Safe Subset
+        # ---------------------------------------------------------
+        self.logger.info("Preparing data for GMM Initialization...")
         self.eval()
-        with torch.no_grad():
-            for data, y in tqdm(subset_loader, desc="Extracting features"):
-                data = data.to(device)
-                # data = (data - data.min()) / (data.max() - data.min() + EPSILON)
-                mu, _ = self.encode(data)
-                Z.append(mu)
-                Y.append(y)
-        Z_cat = torch.cat(Z, 0).detach().cpu().numpy()
-        Y_cat = torch.cat(Y, 0).detach().cpu().numpy()
 
-        self.logger.info("Initializing clusters with K-means...")
+        try:
+            # 1. Try to load 100% of data
+            Z, Y = [], []
+            for data, y in tqdm(train_loader, desc="Extracting FULL features"):
+                with torch.no_grad():
+                    data = data.to(device)
+                    mu, _ = self.encode(data)
+                    Z.append(mu.cpu())
+                    Y.append(y.cpu())
+
+            Z_cat = torch.cat(Z, 0).numpy()
+            self.logger.info(f"Successfully extracted {len(Z_cat)} samples (100%).")
+
+        except RuntimeError as e:
+            if "out of memory" in str(e).lower():
+                self.logger.warning(
+                    "⚠️ OOM extracting 100% data. Switching to 20k subset."
+                )
+                torch.cuda.empty_cache()
+
+                # Fallback: Safe Subset of 20,000 samples
+                subset_size = min(20000, len(train_set))
+                subset_indices = np.random.choice(
+                    len(train_set), size=subset_size, replace=False
+                )
+                subset_loader = torch.utils.data.DataLoader(
+                    torch.utils.data.Subset(train_set, subset_indices),
+                    batch_size=self.batch_size,
+                    shuffle=False,
+                )
+
+                Z, Y = [], []
+                for data, y in tqdm(subset_loader, desc="Extracting SUBSET features"):
+                    with torch.no_grad():
+                        data = data.to(device)
+                        mu, _ = self.encode(data)
+                        Z.append(mu.cpu())
+                        Y.append(y.cpu())
+                Z_cat = torch.cat(Z, 0).numpy()
+            else:
+                raise e
+
+        # 2. Fit K-Means (Fast Initialization)
+        self.logger.info("Fitting K-Means...")
         kmeans = KMeans(
             n_clusters=self.nClusters,
-            random_state=42,
             n_init=20,
-            max_iter=1000,  # More iterations
+            max_iter=1000,
             algorithm="lloyd",
+            random_state=42,
         )
         kmeans.fit(Z_cat)
-        self.logger.info("Fitting GMM to latent space...")
+
+        # 3. Fit GMM (Detailed Initialization)
+        self.logger.info("Fitting GMM...")
         try:
             gmm = GaussianMixture(
                 n_components=self.nClusters,
-                covariance_type="diag",  # Keep diagonal
-                max_iter=1000,  # More iterations (was 10000, but 1000 usually enough)
-                means_init=kmeans.cluster_centers_,
-                reg_covar=1e-4,  # Less regularization (was 1e-3)
-                tol=1e-6,  # Tighter convergence
-                n_init=5,  # Multiple random initializations
-                init_params="random",  # Additional randomization
-                verbose=1,  # See convergence info
-                random_state=42,  # Fixed seed
+                covariance_type="diag",
+                max_iter=1000,
+                means_init=kmeans.cluster_centers_,  # Init with K-Means
+                reg_covar=1e-4,
+                n_init=1,
+                init_params="kmeans",
+                random_state=42,
             )
-            gmm.fit_predict(Z_cat)
-            if not gmm.converged_:
-                self.logger.warning("GMM did not converge")
-            if np.any(gmm.covariances_ <= 0):
-                self.logger.warning("GMM produced invalid covariances")
-            cluster_preds = gmm.fit_predict(Z_cat)
+            gmm.fit(Z_cat)
+
+            # Apply GMM params to model
             self.pi_.data = torch.log(torch.tensor(gmm.weights_, device=device).float())
             self.mu_c.data = torch.tensor(gmm.means_, device=device).float()
             self.log_var_c.data = torch.log(
                 torch.tensor(gmm.covariances_, device=device).float() + EPSILON
             )
-            self.logger.info("Generating latent space visualization...")
-            # try:
-            #     self.visualize_latent_space(
-            #         Z_cat, cluster_preds, Y_cat, context="pretrain_gmm"
-            #     )
-            # except Exception as e:
-            #     self.logger.warning(
-            #         f"Latent space visualization failed: {e}. Skipping..."
-            #     )
+            self.logger.info("✅ GMM Initialization Successful.")
+
         except Exception as e:
-            self.logger.error(
-                f"GMM fitting failed: {e}. Using K-means results instead."
-            )
-            cluster_preds = kmeans.labels_
+            self.logger.error(f"GMM failed ({e}). Reverting to K-Means.")
             self.pi_.data = torch.log(
                 torch.ones(self.nClusters, device=device).float() / self.nClusters
             )
@@ -1588,12 +1366,7 @@ class MyModel(nn.Module):
             self.log_var_c.data = torch.full(
                 (self.nClusters, self.latent_dim), -1.0, device=device
             )
-            self.logger.info(
-                "Generating latent space visualization (K-means fallback)..."
-            )
-        # self._evaluate_clustering(
-        #     subset_loader, device, Y_cat, Z_cat, history, freeze_prior_epochs
-        # )
+
         self.unfreeze_prior()
         self.train()
         return history
@@ -1937,31 +1710,3 @@ def train_with_monitoring(
             "✅ Training completed successfully - latent space appears healthy"
         )
     return history
-
-
-if __name__ == "__main__":
-    import torch.utils.data as data_utils
-
-    dummy_data = torch.randn(1000, 1, 64, 64)
-    dummy_labels = torch.randint(0, 8, (1000,))
-    dataset = data_utils.TensorDataset(dummy_data, dummy_labels)
-    train_loader = data_utils.DataLoader(dataset, batch_size=128, shuffle=True)
-    model = create_model_with_batch_cyclical(
-        latent_dim=10,
-        nClusters=8,
-        batch_size=128,
-        n_cycles_per_epoch=5,
-        cycle_ratio=0.5,
-        gamma=0.01,
-    )
-    history = train_with_monitoring(
-        model=model,
-        train_loader=train_loader,
-        train_set=dataset,
-        learning_rate=1e-3,
-        pretrain_epochs=5,
-        gamma_steps=500,
-        freeze_prior_epochs=0,
-    )
-    plot_training_history(history)
-    print("Training completed! Check the generated plots and logs for results.")
