@@ -107,39 +107,25 @@ class Decoder(nn.Module):
             nn.ConvTranspose2d(ngf * 4, ngf * 2, 4, 2, 1, bias=False),
             nn.BatchNorm2d(ngf * 2),
             nn.LeakyReLU(0.2, inplace=True),
-            # nn.ConvTranspose2d(ngf * 2, ngf * 2, 3, 1, 1, bias=False),
-            # nn.BatchNorm2d(ngf * 2),
-            # nn.LeakyReLU(0.2, inplace=True),
             nn.ConvTranspose2d(ngf * 2, ngf, 4, 2, 1, bias=False),
             nn.BatchNorm2d(ngf),
             nn.LeakyReLU(0.2, inplace=True),
-            # nn.ConvTranspose2d(ngf, ngf, 3, 1, 1, bias=False),
-            # nn.BatchNorm2d(ngf),
-            # nn.LeakyReLU(0.2, inplace=True),
             nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False),
-            nn.Sigmoid(),
         )
 
-        # Initialize weights properly
         self._initialize_weights()
 
     def _initialize_weights(self):
         for _m in self.modules():
             if isinstance(_m, nn.ConvTranspose2d):
-                # Kaiming initialization for transpose convolutions
-                # Prevents checkerboard artifacts and maintains proper variance
                 nn.init.kaiming_normal_(
                     _m.weight, mode="fan_out", nonlinearity="leaky_relu"
                 )
             elif isinstance(_m, nn.Linear):
-                # Xavier initialization for linear layers
-                # Critical for latent space projection layers
                 nn.init.xavier_normal_(_m.weight)
                 if _m.bias is not None:
                     nn.init.constant_(_m.bias, 0)
             elif isinstance(_m, nn.BatchNorm2d):
-                # Standard BatchNorm initialization
-                # Ensures proper normalization from the start
                 nn.init.constant_(_m.weight, 1)
                 nn.init.constant_(_m.bias, 0)
 
@@ -581,7 +567,7 @@ class MyModel(nn.Module):
             if torch.isnan(reconstructed_x).any():
                 self.logger.warning("NaN detected in decoder output")
                 reconstructed_x = torch.nan_to_num(reconstructed_x, nan=0.5)
-            reconstructed_x = torch.clamp(reconstructed_x, 0.0, 1.0)
+            # reconstructed_x = torch.clamp(reconstructed_x, 0.0, 1.0)
             return reconstructed_x, mu, logvar
         except Exception as e:
             self.logger.warning(f"Forward pass failed: {e}")
@@ -651,7 +637,7 @@ class MyModel(nn.Module):
     def RE(
         self, recon_x: torch.Tensor, x: torch.Tensor, normalize: bool = False
     ) -> torch.Tensor:
-        recon_x = torch.clamp(recon_x, 0, 1)
+        # recon_x = torch.clamp(recon_x, 0, 1)
         x = torch.clamp(x, 0, 1)
         flat_size = recon_x[0].numel()
         self.flat_size = flat_size
@@ -788,143 +774,78 @@ class MyModel(nn.Module):
         return image * mask
 
     def get_cluster_centroids_and_visualize(self, output_dir: str = "images/clusters"):
-        """
-        Generates professional visualizations of the learned cluster centroids.
-        Saves both individual images (for slides/detailed analysis) and a merged grid (for papers).
-        """
         import matplotlib.pyplot as plt
-        import mne
         import os
         import math
 
-        # 1. Setup Directories
         os.makedirs(output_dir, exist_ok=True)
-        indiv_dir = os.path.join(output_dir, "individual_maps")
-        os.makedirs(indiv_dir, exist_ok=True)
-
         self.logger.info(f"🎨 Visualizing {self.nClusters} clusters...")
 
-        #  Decode Centroids (Latent -> Data Space)
         self.eval()
         with torch.no_grad():
             decoded_centroids = self.decode(self.mu_c).detach().cpu().numpy()
 
-        #  Process Each Cluster
-        # We store processed maps to generate the grid later without re-processing
-        processed_maps = []
+        decoded_centroids = decoded_centroids.squeeze(1)
 
-        for i in range(self.nClusters):
-            # A. Extract data (Handle 1D vectors vs 2D images)
-            # If your model outputs (1, 32, 1), flatten it.
-            # If it outputs images (1, 64, 64), you need a specific mapper (omitted for safety, assuming vector here)
-            raw_map = decoded_centroids[i].flatten()
+        abs_max = np.percentile(np.abs(decoded_centroids), 99)
+        vlim = (-abs_max, abs_max)
 
-            # Safety check: Ensure data length matches channel info
-            if raw_map.shape[0] != len(self.info.ch_names):
-                # If sizes mismatch, try to slice (e.g., if output is 4096 but we need 32 channels)
-                # This assumes the first N elements are the channels
-                if raw_map.shape[0] > len(self.info.ch_names):
-                    raw_map = raw_map[: len(self.info.ch_names)]
-
-            current_map = raw_map.copy()
-
-            # B. Polarity Invariance Check (Standard Research Practice)
-            # If the strongest peak is negative (Blue), flip it to positive (Red).
-            # This ensures consistent visualization.
-            if np.abs(current_map.min()) > np.abs(current_map.max()):
-                current_map = -current_map
-
-            processed_maps.append(current_map)
-
-            # --- C. SAVE INDIVIDUAL IMAGE ---
-            fig, ax = plt.subplots(figsize=(5, 5))
-
-            # Plot
-            im, _ = mne.viz.plot_topomap(
-                current_map,
-                self.info,
-                axes=ax,
-                show=False,
-                contours=0,  # 0 = smooth gradient (modern look)
-                cmap="RdBu_r",  # Red-Blue Reversed (Red=Pos)
-                sensors=True,  # Show electrode dots
-                res=256,  # High resolution interpolation
-                outlines="head",
-                sphere="auto",
-            )
-
-            # Add Title and Colorbar
-            ax.set_title(f"Cluster {i+1}", fontsize=16, pad=20)
-            plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-
-            # Save
-            save_name = os.path.join(indiv_dir, f"Cluster_{i+1:02d}.png")
-            plt.savefig(save_name, dpi=300, bbox_inches="tight")
-            plt.close()
-
-        self.logger.info(f"✅ Saved {self.nClusters} individual maps to: {indiv_dir}")
-
-        # -- SAVE MERGED GRID (Summary View) ---
         n_cols = 4
         n_rows = math.ceil(self.nClusters / n_cols)
-
-        fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 3.5 * n_rows))
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 4 * n_rows))
         axes = axes.flatten()
 
         for i in range(self.nClusters):
-            mne.viz.plot_topomap(
-                processed_maps[i],
-                self.info,
-                axes=axes[i],
-                show=False,
-                contours=0,
+            # No MNE here. We just plot the image the VAE created.
+            im = axes[i].imshow(
+                decoded_centroids[i],
                 cmap="RdBu_r",
-                sensors=False,  # Hide dots on grid view for cleanliness
+                origin="lower",  # Important for consistency with MNE coordinates
+                vmin=vlim[0],
+                vmax=vlim[1],
             )
+
+            # Optional: Add the head circle mask for aesthetics (if you want)
+            # You would need the make_circular_mask function from your processor
+            # but standard imshow is fine for checking results.
+
             axes[i].set_title(f"Microstate {i+1}", fontsize=12)
+            axes[i].axis("off")
 
         # Hide empty slots
         for i in range(self.nClusters, len(axes)):
             axes[i].axis("off")
 
-        plt.suptitle(
-            f"Learned Microstate Templates (K={self.nClusters})", fontsize=16, y=0.98
-        )
-        plt.tight_layout()
+        plt.suptitle(f"Learned Microstate Templates (K={self.nClusters})", fontsize=16)
+
+        # Add Shared Colorbar
+        cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
+        fig.colorbar(im, cax=cbar_ax, label="Normalized Amplitude")
 
         grid_path = os.path.join(output_dir, "merged_centroids.png")
         plt.savefig(grid_path, dpi=300, bbox_inches="tight")
         plt.close()
 
-        self.logger.info(f"✅ Saved merged summary to: {grid_path}")
+        self.logger.info(f"✅ Saved cluster maps to: {output_dir}")
 
     def perform_research_analysis(
         self,
         data_loader: torch.utils.data.DataLoader,
         output_dir: str = "images/analysis",
     ):
-        """
-        Generates comprehensive research statistics:
-        1. Global Explained Variance (GEV)
-        2. Temporal Dynamics (Mean Duration & Transition Matrix)
-        3. Cluster Occupancy
-        4. Latent Space Manifold (t-SNE)
-        """
-        import seaborn as sns  # Added missing import to fix crash
+        import seaborn as sns
         import matplotlib.pyplot as plt
 
         os.makedirs(output_dir, exist_ok=True)
         self.logger.info("🧪 Starting Research Analysis & Validation...")
         self.get_cluster_centroids_and_visualize(output_dir=output_dir)
-        #  Aggregate Data (X), Latents (Z), and Predictions (Y) ---
+
         self.eval()
         X_list, Z_list, preds_list = [], [], []
 
-        # We need the decoded centroids to calculate GEV against original data
         with torch.no_grad():
-            # Get centroids in data space (Decode the cluster means)
-            centroids_decoded = self.decode(self.mu_c).cpu().numpy()
-            # Handle shape if necessary (flatten channel/spatial dims for correlation)
+            centroids_decoded = self.decode(self.mu_c).detach().cpu().numpy()
+            # Ensure centroids are flattened to match X (e.g., [K, 32] or [K, 1024])
             centroids_flat = centroids_decoded.reshape(self.nClusters, -1)
 
             for data, _ in tqdm(data_loader, desc="Aggregating Statistics"):
@@ -932,7 +853,6 @@ class MyModel(nn.Module):
                 mu, _ = self.encode(data)
                 preds = self.predict(data)
 
-                # Flatten data for correlation calculations
                 X_list.append(data.cpu().numpy().reshape(data.size(0), -1))
                 Z_list.append(mu.cpu().numpy())
                 preds_list.append(preds)
@@ -941,27 +861,35 @@ class MyModel(nn.Module):
         Z = np.concatenate(Z_list, axis=0)
         labels = np.concatenate(preds_list, axis=0)
 
-        #  Global Explained Variance (GEV) ---
-        # GEV = sum((GFP * Correlation)^2) / sum(GFP^2)
+        # --- 1. Global Explained Variance (GEV) [Vectorized] ---
+        self.logger.info("Calculating GEV...")
+
+        # GFP (Global Field Power) = Standard deviation across channels (spatial)
         gfp = np.std(X, axis=1)
         gfp_squared_sum = np.sum(gfp**2)
 
-        numerator = 0
-        for i in range(len(X)):
-            # Correlation between data vector and assigned microstate map
-            map_vector = centroids_flat[labels[i]]
-            data_vector = X[i]
+        # Get the template map assigned to each timepoint
+        assigned_maps = centroids_flat[labels]  # Shape: (N_samples, N_features)
 
-            # Pearson correlation
-            corr = np.corrcoef(data_vector, map_vector)[0, 1]
-            numerator += (gfp[i] * corr) ** 2
+        # Row-wise Pearson Correlation (Vectorized)
+        # Center the data
+        X_centered = X - X.mean(axis=1, keepdims=True)
+        maps_centered = assigned_maps - assigned_maps.mean(axis=1, keepdims=True)
 
-        gev = numerator / gfp_squared_sum
+        # Calculate cosine similarity of centered data (Correlation)
+        num = np.sum(X_centered * maps_centered, axis=1)
+        den = np.sqrt(np.sum(X_centered**2, axis=1) * np.sum(maps_centered**2, axis=1))
+        correlations = num / (den + EPSILON)
+
+        numerator = np.sum((gfp * correlations) ** 2)
+        gev = numerator / (gfp_squared_sum + EPSILON)
+
         self.logger.info(f"📊 Global Explained Variance (GEV): {gev:.4f}")
 
-        # Temporal Dynamics ---
-        # A. Mean Duration (ms)
-        fs = getattr(self.info, "sfreq", 128)  # Default to 128Hz if missing
+        # --- 2. Temporal Dynamics ---
+
+        # A. Mean Duration
+        fs = getattr(self.info, "sfreq", 128)
         durations = {i: [] for i in range(self.nClusters)}
 
         curr_label = labels[0]
@@ -970,11 +898,10 @@ class MyModel(nn.Module):
             if lab == curr_label:
                 curr_dur += 1
             else:
-                durations[curr_label].append(
-                    curr_dur / fs * 1000
-                )  # Convert samples to ms
+                durations[curr_label].append(curr_dur / fs * 1000)
                 curr_label = lab
                 curr_dur = 1
+        durations[curr_label].append(curr_dur / fs * 1000)
 
         mean_durs = [
             np.mean(durations[i]) if durations[i] else 0 for i in range(self.nClusters)
@@ -983,28 +910,32 @@ class MyModel(nn.Module):
         # B. Transition Probability Matrix
         trans_matrix = np.zeros((self.nClusters, self.nClusters))
         for i in range(len(labels) - 1):
-            if labels[i] != labels[i + 1]:
-                trans_matrix[labels[i], labels[i + 1]] += 1
+            trans_matrix[labels[i], labels[i + 1]] += 1
 
-        # Normalize rows
+        # Normalize rows to get probabilities
         row_sums = trans_matrix.sum(axis=1, keepdims=True)
         trans_probs = np.divide(
             trans_matrix, row_sums, out=np.zeros_like(trans_matrix), where=row_sums != 0
         )
 
-        #  Visualization & Saving ---
+        # --- Visualization ---
 
-        # Plot 1: Occupancy
         unique, counts = np.unique(labels, return_counts=True)
-        occupancy = counts / len(labels) * 100
+        # Ensure all clusters are represented in counts
+        counts_full = np.zeros(self.nClusters)
+        for u, c in zip(unique, counts):
+            counts_full[u] = c
+
+        occupancy = counts_full / len(labels) * 100
 
         plt.figure(figsize=(10, 6))
         plt.subplot(1, 2, 1)
-        sns.barplot(x=[f"C{i+1}" for i in unique], y=occupancy, palette="viridis")
+        sns.barplot(
+            x=[f"C{i+1}" for i in range(self.nClusters)], y=occupancy, palette="viridis"
+        )
         plt.title(f"Occupancy (GEV={gev:.2f})")
         plt.ylabel("% Time Active")
 
-        # Plot 2: Mean Duration
         plt.subplot(1, 2, 2)
         sns.barplot(
             x=[f"C{i+1}" for i in range(self.nClusters)], y=mean_durs, palette="magma"
@@ -1015,7 +946,6 @@ class MyModel(nn.Module):
         plt.savefig(os.path.join(output_dir, "temporal_stats.png"), dpi=300)
         plt.close()
 
-        # Plot 3: Transition Matrix
         plt.figure(figsize=(8, 7))
         sns.heatmap(
             trans_probs,
@@ -1027,27 +957,6 @@ class MyModel(nn.Module):
         )
         plt.title("Transition Probability Matrix")
         plt.savefig(os.path.join(output_dir, "transition_matrix.png"), dpi=300)
-        plt.close()
-
-        # Plot 4: Latent Space (t-SNE)
-        # Downsample for t-SNE if dataset is huge (>5000 samples) to save time
-        if len(Z) > 5000:
-            idx = np.random.choice(len(Z), 5000, replace=False)
-            Z_vis = Z[idx]
-            labels_vis = labels[idx]
-        else:
-            Z_vis, labels_vis = Z, labels
-
-        tsne = TSNE(n_components=2, random_state=42, init="pca", learning_rate="auto")
-        z_2d = tsne.fit_transform(Z_vis)
-
-        plt.figure(figsize=(8, 8))
-        scatter = plt.scatter(
-            z_2d[:, 0], z_2d[:, 1], c=labels_vis, cmap="tab10", alpha=0.6, s=15
-        )
-        plt.colorbar(scatter, label="Cluster ID")
-        plt.title("Latent Manifold Topology")
-        plt.savefig(os.path.join(output_dir, "latent_manifold.png"), dpi=300)
         plt.close()
 
         # Save Text Stats

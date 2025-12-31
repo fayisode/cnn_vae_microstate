@@ -519,7 +519,7 @@ class EEGProcessor:
         self._figure_09_butterfly_plot(raw_dataset)
         self._figure_10_frequency_band_topomaps()
         self._figure_11_split_half_reliability(topo_maps)
-        # self._figure_12_spatial_filter_comparison(raw_dataset)
+        self._figure_13_peak_temporal_evolution(raw_dataset)
 
         self.logger.info("=" * 60)
         self.logger.info("All visualizations complete!")
@@ -634,32 +634,66 @@ class EEGProcessor:
             self.logger.error(f"Figure 2 Error: {e}")
 
     def _figure_03_channel_time_series(self):
-        """Figure 3: Individual channel time series."""
+        """Figure 3: All 32 channels over the full trial duration."""
         try:
-            fig, axes = plt.subplots(4, 1, figsize=(14, 10), sharex=True)
-            channels_to_plot = [0, 7, 11, 14]  # Fp1, C3, P3, O1
-            channel_names = [self.ch_names[i] for i in channels_to_plot]
+            #  Setup Data: Select Trial 0, but take ALL timepoints
+            # shape: (n_channels, n_timepoints)
+            trial_data = self.raw_data_structure[0, :, :]
+            n_channels, n_samples = trial_data.shape
 
-            start, end = 0, 512
-            t_axis = np.arange(start, end) / self.sfreq
-            trial_data = self.raw_data_structure[0, :, start:end]
+            # Create time axis for the full duration
+            t_axis = np.arange(n_samples) / self.sfreq
 
-            for idx, (ch_idx, ch_name) in enumerate(
-                zip(channels_to_plot, channel_names)
-            ):
-                axes[idx].plot(
-                    t_axis, trial_data[ch_idx, :], color="#34495e", linewidth=1.2
+            #  Setup Figure: Tall layout for 32 channels
+            fig, axes = plt.subplots(n_channels, 1, figsize=(12, 24), sharex=True)
+            channel_names = self.ch_names
+
+            #  Plot Loop
+            for idx in range(n_channels):
+                ax = axes[idx]
+                ch_name = channel_names[idx]
+
+                # Plot full duration with thinner line for clarity
+                ax.plot(
+                    t_axis,
+                    trial_data[idx, :],
+                    color="#34495e",
+                    linewidth=0.5,  # Thinner line for high-density data
                 )
-                axes[idx].set_ylabel(f"{ch_name}\n(μV)", fontweight="bold")
-                axes[idx].grid(True, alpha=0.3)
-                sns.despine(ax=axes[idx])
 
-            axes[-1].set_xlabel("Time (s)", fontweight="bold")
+                # Label Channel Name on the Left
+                ax.set_ylabel(
+                    ch_name,
+                    rotation=0,
+                    ha="right",
+                    va="center",
+                    fontsize=10,
+                    fontweight="bold",
+                    labelpad=15,
+                )
+
+                # Styling: Clean grid, no y-ticks
+                ax.grid(True, alpha=0.3, linestyle=":")
+                ax.set_yticks([])
+
+                # Despine (remove box borders) for "chart recorder" look
+                sns.despine(ax=ax, bottom=(idx < n_channels - 1), left=True)
+
+            #  Final Adjustments
+            axes[-1].set_xlabel("Time (s)", fontweight="bold", fontsize=12)
+            axes[-1].set_xlim(
+                t_axis[0], t_axis[-1]
+            )  # Explicitly set x-limits to data range
+
             plt.suptitle(
-                "Figure 3: Representative Channel Time Series",
+                f"Figure 3: All Channel Time Series (Full Duration: {t_axis[-1]:.1f}s)",
                 fontweight="bold",
                 fontsize=16,
+                y=1.005,
             )
+
+            # Remove vertical gaps between subplots
+            plt.subplots_adjust(hspace=0.0, top=0.99, bottom=0.05)
 
             self._save_figure("fig03_channel_time_series.png")
 
@@ -831,36 +865,62 @@ class EEGProcessor:
             self.logger.error(f"Figure 8 Error: {e}")
 
     def _figure_09_butterfly_plot(self, raw_dataset):
-        """Figure 9: Butterfly plot with GFP overlay."""
+        """Figure 9: Butterfly plot with GFP overlay (Entire Duration)."""
         try:
-            start_samp, end_samp = 2000, 2512
-            if raw_dataset.shape[1] < end_samp:
-                end_samp = raw_dataset.shape[1]
+            # Get dimensions for the full dataset
+            # raw_dataset shape is (Channels, Time)
+            n_channels, n_samples = raw_dataset.shape
 
-            times = np.arange(0, end_samp - start_samp) / self.sfreq
-            channel_data = raw_dataset[:, start_samp:end_samp].T
-            gfp_data = self.gfp_curve[start_samp:end_samp]
+            # Create full time axis
+            times = np.arange(n_samples) / self.sfreq
 
-            fig, ax = plt.subplots(figsize=(14, 6))
-            ax.plot(times, channel_data, color="#95a5a6", alpha=0.3, linewidth=0.8)
+            #  Transpose data for plotting: (Time, Channels)
+            channel_data = raw_dataset.T
+
+            #  Get full GFP curve
+            # Ensure GFP matches raw_dataset length (handling potential edge cases)
+            gfp_data = self.gfp_curve[:n_samples]
+
+            fig, ax = plt.subplots(figsize=(14, 8))
+
+            #  Plot All Channels (Butterfly Wings)
+            # Use very thin lines (0.05) and low alpha to handle high density
+            ax.plot(
+                times,
+                channel_data,
+                color="#95a5a6",
+                alpha=0.4,
+                linewidth=0.05,
+                zorder=1,
+            )
+
+            #  Plot Global Field Power (Body)
+            # Make this prominent to see the envelope over the dense data
             ax.plot(
                 times,
                 gfp_data,
                 color="#e74c3c",
-                linewidth=3,
+                linewidth=1.0,  # Thinner than before, but thicker than EEG
                 label="Global Field Power",
                 zorder=10,
             )
 
+            #  Formatting
             ax.set_xlabel("Time (s)", fontweight="bold")
             ax.set_ylabel("Amplitude (μV)", fontweight="bold")
+            ax.set_xlim(times[0], times[-1])  # Ensure tight fit
+
             ax.set_title(
-                "Figure 9: Butterfly Plot with GFP Overlay",
+                f"Figure 9: Butterfly Plot (Full Duration: {times[-1]:.1f}s)",
                 fontweight="bold",
                 fontsize=16,
             )
+
+            # Only add one legend entry for GFP
+            # (The channel plots don't need individual legends here)
             ax.legend(loc="upper right", frameon=True, fancybox=True, shadow=True)
-            ax.grid(True, alpha=0.3)
+
+            ax.grid(True, alpha=0.3, linestyle=":")
             sns.despine()
 
             self._save_figure("fig09_butterfly_plot.png")
@@ -962,6 +1022,97 @@ class EEGProcessor:
 
         except Exception as e:
             self.logger.error(f"Figure 11 Error: {e}")
+
+    def _figure_13_peak_temporal_evolution(self, raw_dataset):
+        """
+        Figure 13: Temporal evolution of Topomaps around GFP peaks.
+        Shows 5 random strong peaks with their immediate neighbors (t-2 to t+2).
+        """
+        try:
+            # 1. Find Peaks manually on the GFP curve
+            # We use a distance of ~0.5s (64 samples) to ensure distinct peaks
+            peaks, properties = scipy.signal.find_peaks(
+                self.gfp_curve, distance=64, prominence=np.std(self.gfp_curve)
+            )
+
+            # Sort by prominence/height to get the "strongest" peaks
+            # (Higher GFP usually implies better signal-to-noise ratio for maps)
+            sorted_peak_indices = peaks[np.argsort(properties["prominences"])[::-1]]
+
+            # Select top 5 peaks (ensure we have enough data)
+            n_peaks_to_show = 5
+            selected_peaks = sorted_peak_indices[:n_peaks_to_show]
+
+            # Define window: [-2, -1, 0, 1, 2] samples
+            # At 128Hz, 1 sample = ~8ms. Window covers ±16ms.
+            offsets = np.array([-2, -1, 0, 1, 2])
+            offset_labels = ["t-2", "t-1", "Peak", "t+1", "t+2"]
+
+            fig, axes = plt.subplots(n_peaks_to_show, len(offsets), figsize=(12, 12))
+
+            # Global min/max for consistent color scaling across the figure
+            # We take a sample of data to estimate robust bounds
+            vmin, vmax = np.percentile(raw_dataset, 1), np.percentile(raw_dataset, 99)
+
+            for row_idx, peak_idx in enumerate(selected_peaks):
+                # Extract time indices
+                time_indices = peak_idx + offsets
+
+                # Handle edge cases (start/end of recording)
+                if np.any(time_indices < 0) or np.any(
+                    time_indices >= raw_dataset.shape[1]
+                ):
+                    continue
+
+                for col_idx, t_idx in enumerate(time_indices):
+                    ax = axes[row_idx, col_idx]
+
+                    # Extract channel data for this specific time point
+                    # raw_dataset is (Channels, Time)
+                    channel_values = raw_dataset[:, t_idx]
+
+                    # Create Map
+                    topo = self.create_topographic_map(channel_values, self.pos_2d)
+
+                    # Plot
+                    im = ax.imshow(
+                        topo, cmap="RdBu_r", origin="lower", vmin=vmin, vmax=vmax
+                    )
+                    clip_path = self.make_circular_mask(ax, self.topo_map_size)
+                    im.set_clip_path(clip_path)
+                    ax.axis("off")
+
+                    # Labels
+                    if row_idx == 0:
+                        ax.set_title(offset_labels[col_idx], fontweight="bold")
+                    if col_idx == 0:
+                        # Add peak timestamp on the left
+                        timestamp = peak_idx / self.sfreq
+                        ax.text(
+                            -0.2,
+                            0.5,
+                            f"Peak @\n{timestamp:.1f}s",
+                            transform=ax.transAxes,
+                            va="center",
+                            fontweight="bold",
+                        )
+
+            # Add colorbar
+            cbar_ax = fig.add_axes([0.92, 0.3, 0.02, 0.4])
+            fig.colorbar(im, cax=cbar_ax, label="Amplitude (μV)")
+
+            plt.suptitle(
+                "Figure 13: Temporal Evolution of Topomaps around GFP Peaks\n"
+                "(Columns show ±2 samples neighbors)",
+                fontweight="bold",
+                fontsize=16,
+                y=0.95,
+            )
+
+            self._save_figure("fig13_peak_temporal_evolution.png")
+
+        except Exception as e:
+            self.logger.error(f"Figure 13 Error: {e}")
 
     # =========================================================================
     # Data Preparation for Deep Learning

@@ -19,6 +19,7 @@ from sklearn.metrics import confusion_matrix
 from scipy.optimize import linear_sum_assignment
 import matplotlib.pyplot as plt
 import model as _m
+import baseline as _b
 import helper_function as _g
 from sklearn.metrics import (
     silhouette_score,
@@ -1499,11 +1500,64 @@ class VAEClusteringTrainer:
             )
             self.run_explainability()
             self.run_deep_diagnostics()
-            final_metrics = self.run_final_comparison()
-            return final_metrics
+
+            vae_results = self.run_final_comparison()
+
+            # --- START BASELINE INTEGRATION ---
+            self.logger.info(
+                "\n" + "=" * 60 + "\nSTEP 4: RUNNING BASELINE (ModKMeans)\n" + "=" * 60
+            )
+
+            # Initialize Baseline Handler
+            baseline_handler = _b.BaselineHandler(
+                n_clusters=self.model.nClusters,
+                device=self.device,
+                logger=self.logger,
+                output_dir=self.output_dir,
+            )
+
+            # Run Baseline
+            baseline_handler.fit(self.train_loader)
+            baseline_handler.visualize_centroids()
+            baseline_metrics = baseline_handler.evaluate(self.test_loader)
+
+            # Merge Results for Comparison Report
+            vae_best_strategy = max(
+                vae_results.keys(),
+                key=lambda k: vae_results[k]["test_performance"]["clustering_score"],
+            )
+            vae_best = vae_results[vae_best_strategy]["test_performance"]
+
+            self._generate_final_comparison_report(vae_best, baseline_metrics)
+
+            return vae_results
         except Exception as e:
             self.logger.error(f"Pipeline failed: {e}", exc_info=True)
             raise
+
+    def _generate_final_comparison_report(self, vae_metrics, baseline_metrics):
+        """Generates a text file comparing VAE vs ModKMeans"""
+        report = (
+            "============================================================\n"
+            "FINAL MODEL COMPARISON: VAE vs. Modified K-Means (Baseline)\n"
+            "============================================================\n\n"
+            f"{'Metric':<20} | {'VAE (Best Strategy)':<20} | {'Baseline (ModKMeans)':<20}\n"
+            "---------------------|----------------------|---------------------\n"
+            f"{'Silhouette':<20} | {vae_metrics.get('silhouette_scores', 0):<20.4f} | {baseline_metrics.get('silhouette_scores', 0):<20.4f}\n"
+            f"{'Davies-Bouldin':<20} | {vae_metrics.get('db_scores', 0):<20.4f} | {baseline_metrics.get('db_scores', 0):<20.4f}\n"
+            f"{'Calinski-Harabasz':<20} | {vae_metrics.get('ch_scores', 0):<20.4f} | {baseline_metrics.get('ch_scores', 0):<20.4f}\n"
+            f"{'GEV (Proxy)':<20} | {'See Research Stats':<20} | {baseline_metrics.get('gev', 0):<20.4f}\n"
+            "\n"
+            "Note: VAE metrics are calculated in Latent Space.\n"
+            "Baseline metrics are calculated in raw Feature Space (ignoring polarity).\n"
+        )
+
+        with open(self.output_dir / "VAE_vs_Baseline_Comparison.txt", "w") as f:
+            f.write(report)
+
+        self.logger.info(
+            f"Comparison report saved to {self.output_dir / 'VAE_vs_Baseline_Comparison.txt'}"
+        )
 
     def run_deep_diagnostics(self):
         """
